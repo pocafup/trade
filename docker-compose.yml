@@ -1,0 +1,14 @@
+services:
+  trade:
+    build: .
+    container_name: trade-app
+    ports:
+      - "3001:3000"
+    volumes:
+      - trade_data:/app/data
+    environment:
+      - DB_PATH=/app/data/trade.db
+    restart: unless-stopped
+
+volumes:
+  trade_data:

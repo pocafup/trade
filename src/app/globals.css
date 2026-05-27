@@ -1,0 +1,35 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #080B14;
+  --card: #0F1520;
+  --hover: #172033;
+  --input: #141C2C;
+  --border: #1E2D42;
+  --text: #E8EDFB;
+  --muted: #6B7E9C;
+  --brand: #4F8EF7;
+  --green: #22C55E;
+  --red: #F43F5E;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.up { color: var(--green); }
+.down { color: var(--red); }
+.mono { font-family: 'JetBrains Mono', monospace; }
