@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import db from '@/lib/db';
+import { getDb } from '@/lib/db';
+import { getQuote } from '@/lib/yahoo';
 
 export const dynamic = 'force-dynamic';
-import { getQuote } from '@/lib/yahoo';
 
 interface Txn {
   ticker: string;
@@ -14,6 +14,7 @@ interface Txn {
 }
 
 export async function GET() {
+  const db = getDb();
   const txns = db.prepare('SELECT * FROM transactions ORDER BY date ASC').all() as unknown as Txn[];
 
   const byTicker = new Map<string, { txns: Txn[]; name: string }>();
