@@ -1,3 +1,4 @@
+!public/.gitkeep
 node_modules/
 .next/
 data/
