@@ -1,10 +1,12 @@
 'use client';
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, RefreshCw, TrendingUp, TrendingDown, BarChart3, Search, ArrowUpDown, X } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Plus, RefreshCw, TrendingUp, TrendingDown, BarChart3, Search, ArrowUpDown, X, AlertTriangle, Zap } from 'lucide-react';
 import HoldingsTable from '@/components/HoldingsTable';
 import TransactionList from '@/components/TransactionList';
 import TransactionModal from '@/components/TransactionModal';
 import FontSizeToggle from '@/components/FontSizeToggle';
+import type { DailyInsight } from '@/lib/daily-focus';
 
 interface Summary { totalValue: number; totalCost: number; totalPnl: number; totalPnlPct: number }
 interface Holding { ticker: string; name: string; shares: number; avgCost: number; currentPrice: number; currentValue: number; pnl: number; pnlPct: number; dayChange: number; dayChangePct: number; portfolioPct: number }
@@ -40,11 +42,13 @@ const MIN_ALLOC_OPTIONS = [
 ];
 
 export default function Dashboard() {
+  const router = useRouter();
   const [portfolio, setPortfolio] = useState<{ holdings: Holding[]; summary: Summary } | null>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [tab, setTab] = useState<'holdings' | 'transactions'>('holdings');
+  const [insight, setInsight] = useState<DailyInsight | null>(null);
 
   // Filter state
   const [search, setSearch] = useState('');
@@ -64,7 +68,13 @@ export default function Dashboard() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    fetch('/api/daily-focus')
+      .then(r => r.json())
+      .then(setInsight)
+      .catch(() => {});
+  }, [load]);
 
   const filteredHoldings = useMemo(() => {
     let result = portfolio?.holdings ?? [];
@@ -120,6 +130,35 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 pb-24 pt-6">
+        {/* Risk alerts — shown above everything if any held stocks have bearish signals */}
+        {(insight?.alerts.length ?? 0) > 0 && (
+          <section className="mb-4">
+            <div className="rounded-2xl bg-rose-950/40 border border-rose-500/40 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <AlertTriangle size={15} className="text-rose-400 shrink-0" />
+                <p className="text-sm font-semibold text-rose-300">持仓风险预警</p>
+              </div>
+              <div className="space-y-3">
+                {insight!.alerts.map(a => (
+                  <button key={a.ticker} onClick={() => router.push(`/stock/${a.ticker}`)}
+                    className="w-full text-left group">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-mono font-bold text-sm text-rose-300">{a.ticker}</span>
+                      <span className="text-xs text-rose-400/70">{a.name}</span>
+                      <span className="ml-auto font-mono text-xs text-rose-400">
+                        {a.changePct >= 0 ? '+' : ''}{a.changePct.toFixed(2)}%
+                      </span>
+                    </div>
+                    <p className="text-xs text-rose-200/70 leading-relaxed group-hover:text-rose-200 transition-colors">
+                      {a.warning}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* Portfolio summary */}
         <section className="mb-6">
           {loading && !portfolio ? (
@@ -162,6 +201,47 @@ export default function Dashboard() {
               )}
             </div>
           ) : null}
+        </section>
+
+        {/* Today's focus stocks */}
+        <section className="mb-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Zap size={13} className="text-[#4F8EF7]" />
+            <p className="text-xs font-medium text-[#6B7E9C] uppercase tracking-wider">今日看涨</p>
+          </div>
+          {!insight ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="h-24 rounded-2xl bg-[#0F1520] animate-pulse" />
+              ))}
+            </div>
+          ) : insight.focus.length === 0 ? (
+            <p className="text-xs text-[#3A4E6A]">暂无数据，稍后刷新</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {insight.focus.map(stock => {
+                const pos = stock.changePct >= 0;
+                return (
+                  <button key={stock.ticker} onClick={() => router.push(`/stock/${stock.ticker}`)}
+                    className="text-left rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-4 hover:border-[#4F8EF7]/50 hover:bg-[#111B2E] active:bg-[#172033] transition-all group">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-sm text-[#4F8EF7]">{stock.ticker}</span>
+                        <span className={`text-xs font-mono font-semibold ${pos ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {pos ? '+' : ''}{stock.changePct.toFixed(2)}%
+                        </span>
+                      </div>
+                      <span className="font-mono text-xs text-[#6B7E9C]">${stock.price.toFixed(2)}</span>
+                    </div>
+                    <p className="text-[10px] text-[#6B7E9C] mb-2 truncate">{stock.name}</p>
+                    <p className="text-xs text-[#8B9CC0] leading-relaxed line-clamp-3 group-hover:text-[#C8D4EC] transition-colors">
+                      {stock.reason}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         {/* Tab switcher */}
