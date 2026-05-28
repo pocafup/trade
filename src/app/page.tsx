@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, RefreshCw, TrendingUp, TrendingDown, BarChart3, Search, ArrowUpDown, X, AlertTriangle, Zap, Star, Trash2 } from 'lucide-react';
+import { Plus, RefreshCw, TrendingUp, TrendingDown, BarChart3, Search, ArrowUpDown, X, AlertTriangle, Zap, Star, Trash2, LogOut, KeyRound, Eye, EyeOff } from 'lucide-react';
 import HoldingsTable from '@/components/HoldingsTable';
 import TransactionList from '@/components/TransactionList';
 import TransactionModal from '@/components/TransactionModal';
@@ -43,6 +43,7 @@ export default function Dashboard() {
   const [modal, setModal] = useState(false);
   const [tab, setTab] = useState<Tab>('holdings');
   const [insight, setInsight] = useState<DailyInsight | null>(null);
+  const [changePwModal, setChangePwModal] = useState(false);
 
   // Watchlist state
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
@@ -144,10 +145,21 @@ export default function Dashboard() {
             <BarChart3 size={18} className="text-[#4F8EF7]" />
             <span className="font-semibold text-sm tracking-tight">Trade Tracker</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <FontSizeToggle />
             <button onClick={load} className="p-2 rounded-lg hover:bg-[#172033] text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">
               <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+            </button>
+            <button onClick={() => setChangePwModal(true)} title="修改账户"
+              className="p-2 rounded-lg hover:bg-[#172033] text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">
+              <KeyRound size={15} />
+            </button>
+            <button onClick={async () => {
+              await fetch('/api/auth/logout', { method: 'POST' });
+              router.push('/login');
+            }} title="退出登录"
+              className="p-2 rounded-lg hover:bg-[#172033] text-[#6B7E9C] hover:text-rose-400 transition-colors">
+              <LogOut size={15} />
             </button>
             <button onClick={() => setModal(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-[#4F8EF7] hover:bg-[#6EA3FF] text-white text-sm font-medium rounded-lg transition-colors">
@@ -389,6 +401,7 @@ export default function Dashboard() {
       </button>
 
       {modal && <TransactionModal onClose={() => setModal(false)} onSaved={load} />}
+      {changePwModal && <ChangePasswordModal onClose={() => setChangePwModal(false)} />}
     </div>
   );
 }
@@ -478,6 +491,104 @@ function WatchlistTab({
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── 修改密码弹窗 ───────────────────────────────────────────────────────────────
+function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  const [currentPw, setCurrentPw]   = useState('');
+  const [newUser, setNewUser]       = useState('');
+  const [newPw, setNewPw]           = useState('');
+  const [confirmPw, setConfirmPw]   = useState('');
+  const [showPw, setShowPw]         = useState(false);
+  const [error, setError]           = useState('');
+  const [loading, setLoading]       = useState(false);
+  const [done, setDone]             = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    if (newPw !== confirmPw) { setError('两次输入的新密码不一致'); return; }
+    if (newPw.length < 6) { setError('密码至少6位'); return; }
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: currentPw, newUsername: newUser, newPassword: newPw }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || '修改失败'); return; }
+      setDone(true);
+      setTimeout(async () => {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        router.push('/login');
+      }, 1500);
+    } catch {
+      setError('网络错误');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-sm bg-[#0F1520] border border-[#1E2D42] rounded-2xl p-6">
+        <div className="flex items-center gap-2 mb-5">
+          <KeyRound size={13} className="text-[#6B7E9C]" />
+          <p className="text-xs font-medium text-[#6B7E9C] uppercase tracking-wider">修改账户信息</p>
+        </div>
+
+        {done ? (
+          <p className="text-sm text-emerald-400 text-center py-4">修改成功！即将跳转登录页…</p>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div>
+              <label className="block text-xs text-[#6B7E9C] mb-1.5">当前密码</label>
+              <div className="relative">
+                <input type={showPw ? 'text' : 'password'} value={currentPw} onChange={e => setCurrentPw(e.target.value)} required
+                  className="w-full px-3.5 py-2.5 pr-10 rounded-xl bg-[#141C2C] border border-[#1E2D42] text-sm focus:outline-none focus:border-[#4F8EF7]" />
+                <button type="button" onClick={() => setShowPw(s => !s)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6B7E9C] hover:text-[#E8EDFB]">
+                  {showPw ? <EyeOff size={13} /> : <Eye size={13} />}
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-[#6B7E9C] mb-1.5">新用户名</label>
+              <input type="text" value={newUser} onChange={e => setNewUser(e.target.value)} required
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#141C2C] border border-[#1E2D42] text-sm focus:outline-none focus:border-[#4F8EF7]" />
+            </div>
+            <div>
+              <label className="block text-xs text-[#6B7E9C] mb-1.5">新密码</label>
+              <input type={showPw ? 'text' : 'password'} value={newPw} onChange={e => setNewPw(e.target.value)} required
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#141C2C] border border-[#1E2D42] text-sm focus:outline-none focus:border-[#4F8EF7]" />
+            </div>
+            <div>
+              <label className="block text-xs text-[#6B7E9C] mb-1.5">确认新密码</label>
+              <input type={showPw ? 'text' : 'password'} value={confirmPw} onChange={e => setConfirmPw(e.target.value)} required
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#141C2C] border border-[#1E2D42] text-sm focus:outline-none focus:border-[#4F8EF7]" />
+            </div>
+
+            {error && (
+              <p className="text-xs text-rose-400 bg-rose-400/10 border border-rose-400/20 rounded-xl px-3 py-2">{error}</p>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={onClose}
+                className="flex-1 py-2.5 rounded-xl border border-[#1E2D42] text-sm text-[#6B7E9C] hover:text-[#E8EDFB] hover:border-[#2A3F60] transition-colors">
+                取消
+              </button>
+              <button type="submit" disabled={loading}
+                className="flex-1 py-2.5 rounded-xl bg-[#4F8EF7] hover:bg-[#6EA3FF] disabled:opacity-50 text-white font-medium text-sm transition-colors">
+                {loading ? '保存中…' : '保存'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
     </div>
   );
 }

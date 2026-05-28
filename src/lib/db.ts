@@ -30,6 +30,11 @@ export function getDb(): DatabaseSync {
       name TEXT NOT NULL DEFAULT '',
       added_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     );
+    CREATE TABLE IF NOT EXISTS credentials (
+      id INTEGER PRIMARY KEY CHECK(id = 1),
+      username TEXT NOT NULL,
+      password_hash TEXT NOT NULL
+    );
   `);
 
   return _db;
