@@ -7,8 +7,8 @@ function secret() {
   return process.env.AUTH_SECRET ?? DEFAULT_SECRET;
 }
 
-function b64url(buf: ArrayBuffer): string {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+function b64url(buf: Uint8Array): string {
+  return btoa(String.fromCharCode(...buf))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
@@ -24,7 +24,7 @@ async function sign(payload: string): Promise<string> {
     'raw', enc.encode(secret()), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
   );
   const sig = await crypto.subtle.sign('HMAC', key, enc.encode(payload));
-  return b64url(sig);
+  return b64url(new Uint8Array(sig));
 }
 
 async function verify(payload: string, sig: string): Promise<boolean> {
@@ -33,14 +33,14 @@ async function verify(payload: string, sig: string): Promise<boolean> {
     'raw', enc.encode(secret()), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']
   );
   try {
-    return await crypto.subtle.verify('HMAC', key, b64urlDecode(sig).buffer as ArrayBuffer, enc.encode(payload));
+    return await crypto.subtle.verify('HMAC', key, b64urlDecode(sig) as unknown as Uint8Array<ArrayBuffer>, enc.encode(payload));
   } catch { return false; }
 }
 
 export async function createToken(username: string): Promise<string> {
   const payload = b64url(new TextEncoder().encode(
     JSON.stringify({ sub: username, exp: Math.floor(Date.now() / 1000) + SESSION_TTL })
-  ).buffer as ArrayBuffer);
+  ));
   const sig = await sign(payload);
   return `${payload}.${sig}`;
 }
