@@ -95,6 +95,17 @@ export default function Dashboard() {
     fetch('/api/daily-focus').then(r => r.json()).then(setInsight).catch(() => {});
   }, [load, loadWatchlist]);
 
+  // Auto-refresh every 60s, skip when tab is hidden
+  useEffect(() => {
+    const tick = () => {
+      if (document.hidden) return;
+      load();
+      setPnlData(null); // force PnL re-fetch on next visit to that tab
+    };
+    const id = setInterval(tick, 60_000);
+    return () => clearInterval(id);
+  }, [load]);
+
   // Load portfolio chart when opened or range changes
   useEffect(() => {
     if (!chartOpen) return;

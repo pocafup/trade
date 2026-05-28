@@ -211,7 +211,7 @@ export async function getQuoteSummary(ticker: string) {
       },
     };
 
-    summaryCache.set(ticker, { data, expiry: Date.now() + 5 * 60_000 });
+    summaryCache.set(ticker, { data, expiry: Date.now() + 60_000 });
     return data;
   } catch {
     return null;

@@ -338,6 +338,8 @@ export default function StockDetail() {
   const [range, setRange]           = useState<Range>('1d');
   const [hoverIdx, setHoverIdx]     = useState<number | null>(null);
   const [inWatchlist, setInWatchlist] = useState(false);
+  const [livePrice, setLivePrice]   = useState<number | null>(null);
+  const [livePrevClose, setLivePrevClose] = useState<number | null>(null);
 
   useEffect(() => {
     // Check watchlist status
@@ -360,7 +362,10 @@ export default function StockDetail() {
         setData(await stockRes.json());
         setNews(await newsRes.json());
         setPosition(pf.holdings?.find((h: any) => h.ticker === ticker) ?? null);
-        setChartData(await chartRes.json());
+        const cd = await chartRes.json();
+        setChartData(cd);
+        if (cd?.points?.length) setLivePrice(cd.points[cd.points.length - 1].p);
+        if (cd?.prevClose)      setLivePrevClose(cd.prevClose);
         setMyTxns(allTxns.filter((t: any) => t.ticker === ticker));
       } finally {
         setLoading(false);
@@ -372,6 +377,22 @@ export default function StockDetail() {
         .catch(() => {});
     }
     load();
+  }, [ticker]);
+
+  // Poll live price every 30s from the lightweight chart endpoint (60s server cache)
+  useEffect(() => {
+    if (!ticker) return;
+    const poll = async () => {
+      if (document.hidden) return;
+      try {
+        const res = await fetch(`/api/chart/${ticker}?range=1d`);
+        const cd = await res.json();
+        if (cd?.points?.length) setLivePrice(cd.points[cd.points.length - 1].p);
+        if (cd?.prevClose)      setLivePrevClose(cd.prevClose);
+      } catch {}
+    };
+    const id = setInterval(poll, 30_000);
+    return () => clearInterval(id);
   }, [ticker]);
 
   async function toggleWatchlist() {
@@ -403,9 +424,10 @@ export default function StockDetail() {
   const cal     = data?.summary?.calendarEvents;
   const earningsHistory: any[] = data?.summary?.earningsHistory ?? [];
 
-  const price     = q?.regularMarketPrice ?? 0;
-  const change    = q?.regularMarketChange ?? 0;
-  const changePct = q?.regularMarketChangePercent ?? 0;
+  const price     = livePrice ?? (q?.regularMarketPrice ?? 0);
+  const prevClose = livePrevClose ?? (q?.regularMarketPrice ? q.regularMarketPrice - (q.regularMarketChange ?? 0) : price);
+  const change    = price - prevClose;
+  const changePct = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
   const pos       = change >= 0;
 
   const recoInfo    = fin?.recommendationKey ? RECO[fin.recommendationKey] ?? null : null;
