@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, RefreshCw, TrendingUp, TrendingDown, BarChart3, Search, ArrowUpDown, X, AlertTriangle, Zap, Star, Trash2, LogOut, KeyRound, Eye, EyeOff } from 'lucide-react';
+import { Plus, RefreshCw, TrendingUp, TrendingDown, BarChart3, Search, ArrowUpDown, X, AlertTriangle, Zap, Star, Trash2, LogOut, KeyRound, Eye, EyeOff, ChevronDown, ChevronUp } from 'lucide-react';
 import HoldingsTable from '@/components/HoldingsTable';
 import TransactionList from '@/components/TransactionList';
 import TransactionModal from '@/components/TransactionModal';
@@ -11,9 +11,11 @@ import type { DailyInsight } from '@/lib/daily-focus';
 interface Summary { totalValue: number; totalCost: number; totalPnl: number; totalPnlPct: number }
 interface Holding { ticker: string; name: string; shares: number; avgCost: number; currentPrice: number; currentValue: number; pnl: number; pnlPct: number; dayChange: number; dayChangePct: number; portfolioPct: number }
 interface WatchItem { ticker: string; name: string; price: number; change: number; changePct: number }
+interface PnlRecord { ticker: string; name: string; status: 'open' | 'closed'; realizedPnl: number; unrealizedPnl: number; totalPnl: number; currentShares: number; currentPrice: number; avgCost: number; firstBuyDate: string; lastActivityDate: string; holdingDays: number }
 
 type SortKey = 'value' | 'alloc' | 'pnlPct' | 'pnl' | 'name';
-type Tab = 'holdings' | 'transactions' | 'watchlist';
+type Tab = 'holdings' | 'pnl' | 'transactions' | 'watchlist';
+type ChartRange = '1mo' | '3mo' | '1y' | 'max';
 
 function fmt(n: number) {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -26,14 +28,17 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'pnl',    label: '盈亏 $' },
   { key: 'name',   label: '名称' },
 ];
-const MIN_VALUE_OPTIONS = [
-  { label: '不限', value: 0 }, { label: '>$1K', value: 1000 },
-  { label: '>$5K', value: 5000 }, { label: '>$10K', value: 10000 },
+const CHART_RANGES: { key: ChartRange; label: string }[] = [
+  { key: '1mo', label: '1月' }, { key: '3mo', label: '3月' },
+  { key: '1y',  label: '1年' }, { key: 'max', label: '全部' },
 ];
-const MIN_ALLOC_OPTIONS = [
-  { label: '不限', value: 0 }, { label: '>1%', value: 1 },
-  { label: '>5%', value: 5 }, { label: '>10%', value: 10 },
-];
+
+function fmtDuration(days: number): string {
+  if (days < 30) return `${days}天`;
+  if (days < 365) return `${Math.floor(days / 30)}个月`;
+  const y = Math.floor(days / 365), m = Math.floor((days % 365) / 30);
+  return m > 0 ? `${y}年${m}个月` : `${y}年`;
+}
 
 export default function Dashboard() {
   const router = useRouter();
@@ -56,8 +61,17 @@ export default function Dashboard() {
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<SortKey>('value');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
-  const [minValue, setMinValue] = useState(0);
-  const [minAlloc, setMinAlloc] = useState(0);
+
+  // Portfolio chart state
+  const [chartOpen, setChartOpen]     = useState(false);
+  const [chartRange, setChartRange]   = useState<ChartRange>('1y');
+  const [chartPoints, setChartPoints] = useState<{t:number;p:number}[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [chartHover, setChartHover]   = useState<number | null>(null);
+
+  // PnL tab state
+  const [pnlData, setPnlData]       = useState<PnlRecord[] | null>(null);
+  const [pnlLoading, setPnlLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,6 +94,21 @@ export default function Dashboard() {
     loadWatchlist();
     fetch('/api/daily-focus').then(r => r.json()).then(setInsight).catch(() => {});
   }, [load, loadWatchlist]);
+
+  // Load portfolio chart when opened or range changes
+  useEffect(() => {
+    if (!chartOpen) return;
+    setChartLoading(true);
+    fetch(`/api/portfolio/chart?range=${chartRange}`)
+      .then(r => r.json()).then(setChartPoints).catch(() => {}).finally(() => setChartLoading(false));
+  }, [chartOpen, chartRange]);
+
+  // Load PnL when tab selected
+  useEffect(() => {
+    if (tab !== 'pnl' || pnlData) return;
+    setPnlLoading(true);
+    fetch('/api/pnl').then(r => r.json()).then(setPnlData).catch(() => {}).finally(() => setPnlLoading(false));
+  }, [tab, pnlData]);
 
   // Debounced watchlist search
   useEffect(() => {
@@ -118,8 +147,6 @@ export default function Dashboard() {
       const q = search.toLowerCase();
       result = result.filter(h => h.ticker.toLowerCase().includes(q) || h.name.toLowerCase().includes(q));
     }
-    if (minValue > 0) result = result.filter(h => h.currentValue >= minValue);
-    if (minAlloc > 0) result = result.filter(h => h.portfolioPct >= minAlloc);
     return [...result].sort((a, b) => {
       let va: number | string, vb: number | string;
       if (sortBy === 'value')        { va = a.currentValue; vb = b.currentValue; }
@@ -130,9 +157,9 @@ export default function Dashboard() {
       if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb as string) : (vb as string).localeCompare(va);
       return sortDir === 'asc' ? va - (vb as number) : (vb as number) - va;
     });
-  }, [portfolio, search, sortBy, sortDir, minValue, minAlloc]);
+  }, [portfolio, search, sortBy, sortDir]);
 
-  const hasFilter = search || minValue > 0 || minAlloc > 0;
+  const hasFilter = !!search;
   const s = portfolio?.summary;
   const pos = (s?.totalPnl ?? 0) >= 0;
   const watchlistTickers = new Set(watchlist.map(w => w.ticker));
@@ -202,39 +229,79 @@ export default function Dashboard() {
           {loading && !portfolio ? (
             <div className="h-28 rounded-2xl bg-[#0F1520] animate-pulse" />
           ) : s ? (
-            <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5 sm:p-6">
-              <div className="flex flex-col sm:flex-row sm:items-end gap-4 sm:gap-8">
-                <div>
-                  <p className="text-xs text-[#6B7E9C] mb-1 uppercase tracking-wider">总资产</p>
-                  <p className="text-3xl sm:text-4xl font-bold font-mono tracking-tight">${fmt(s.totalValue)}</p>
+            <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] overflow-hidden">
+              <div className="p-5 sm:p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs text-[#6B7E9C] mb-1 uppercase tracking-wider">总资产</p>
+                    <p className="text-3xl sm:text-4xl font-bold font-mono tracking-tight">${fmt(s.totalValue)}</p>
+                    <div className={`flex items-center gap-2 mt-2 ${pos ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {pos ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                      <span className="font-mono text-base font-semibold">{pos ? '+' : ''}${fmt(s.totalPnl)}</span>
+                      <span className="font-mono text-sm opacity-80">({pos ? '+' : ''}{fmt(s.totalPnlPct)}%)</span>
+                    </div>
+                  </div>
+                  <button onClick={() => setChartOpen(o => !o)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#141C2C] border border-[#1E2D42] text-xs text-[#6B7E9C] hover:text-[#E8EDFB] hover:border-[#4F8EF7]/40 transition-colors mt-1 shrink-0">
+                    {chartOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    走势图
+                  </button>
                 </div>
-                <div className={`flex items-center gap-2 pb-1 ${pos ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {pos ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-                  <span className="font-mono text-lg font-semibold">{pos ? '+' : ''}${fmt(s.totalPnl)}</span>
-                  <span className="font-mono text-sm opacity-80">({pos ? '+' : ''}{fmt(s.totalPnlPct)}%)</span>
-                </div>
+                {portfolio!.holdings.length > 0 && (
+                  <div className="mt-5 pt-4 border-t border-[#1E2D42]">
+                    <div className="flex gap-1 h-2 rounded-full overflow-hidden">
+                      {portfolio!.holdings.map(h => (
+                        <div key={h.ticker} title={`${h.ticker}: ${h.portfolioPct.toFixed(1)}%`}
+                          className="h-full first:rounded-l-full last:rounded-r-full opacity-80 hover:opacity-100 transition-opacity"
+                          style={{ width: `${h.portfolioPct}%`, backgroundColor: stringToColor(h.ticker) }} />
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3">
+                      {portfolio!.holdings.slice(0, 6).map(h => (
+                        <div key={h.ticker} className="flex items-center gap-1.5 text-xs text-[#6B7E9C]">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: stringToColor(h.ticker) }} />
+                          <span className="font-mono">{h.ticker}</span>
+                          <span>{h.portfolioPct.toFixed(1)}%</span>
+                        </div>
+                      ))}
+                      {portfolio!.holdings.length > 6 && (
+                        <span className="text-xs text-[#3A4E6A]">+{portfolio!.holdings.length - 6} more</span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-              {portfolio!.holdings.length > 0 && (
-                <div className="mt-5 pt-4 border-t border-[#1E2D42]">
-                  <div className="flex gap-1 h-2 rounded-full overflow-hidden">
-                    {portfolio!.holdings.map(h => (
-                      <div key={h.ticker} title={`${h.ticker}: ${h.portfolioPct.toFixed(1)}%`}
-                        className="h-full first:rounded-l-full last:rounded-r-full opacity-80 hover:opacity-100 transition-opacity"
-                        style={{ width: `${h.portfolioPct}%`, backgroundColor: stringToColor(h.ticker) }} />
-                    ))}
+
+              {/* Collapsible chart */}
+              {chartOpen && (
+                <div className="border-t border-[#1E2D42] px-4 pb-4 pt-3">
+                  {/* Range tabs + hover value */}
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex gap-1">
+                      {CHART_RANGES.map(r => (
+                        <button key={r.key} onClick={() => setChartRange(r.key)}
+                          className={`px-2.5 py-1 rounded-lg text-xs transition-all ${chartRange === r.key ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] border border-[#4F8EF7]/40' : 'text-[#6B7E9C] hover:text-[#E8EDFB] hover:bg-[#172033]'}`}>
+                          {r.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="text-right">
+                      {chartHover != null && chartPoints[chartHover] ? (
+                        <span className="font-mono text-sm font-semibold text-[#E8EDFB]">
+                          ${fmt(chartPoints[chartHover].p)}
+                        </span>
+                      ) : (
+                        <span className="font-mono text-sm text-[#6B7E9C]">${fmt(s.totalValue)}</span>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3">
-                    {portfolio!.holdings.slice(0, 6).map(h => (
-                      <div key={h.ticker} className="flex items-center gap-1.5 text-xs text-[#6B7E9C]">
-                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: stringToColor(h.ticker) }} />
-                        <span className="font-mono">{h.ticker}</span>
-                        <span>{h.portfolioPct.toFixed(1)}%</span>
-                      </div>
-                    ))}
-                    {portfolio!.holdings.length > 6 && (
-                      <span className="text-xs text-[#3A4E6A]">+{portfolio!.holdings.length - 6} more</span>
-                    )}
-                  </div>
+                  {chartLoading ? (
+                    <div className="h-28 rounded-xl bg-[#141C2C] animate-pulse" />
+                  ) : chartPoints.length < 2 ? (
+                    <div className="h-28 flex items-center justify-center text-xs text-[#3A4E6A]">暂无足够数据</div>
+                  ) : (
+                    <PortfolioChart points={chartPoints} height={112} hoverIdx={chartHover} onHover={setChartHover} />
+                  )}
                 </div>
               )}
             </div>
@@ -283,19 +350,16 @@ export default function Dashboard() {
         </section>
 
         {/* Tab switcher */}
-        <div className="flex gap-1 mb-4 p-1 bg-[#0F1520] border border-[#1E2D42] rounded-xl w-fit">
-          {(['holdings', 'transactions', 'watchlist'] as Tab[]).map(t => (
+        <div className="flex gap-1 mb-4 p-1 bg-[#0F1520] border border-[#1E2D42] rounded-xl w-fit flex-wrap">
+          {(['holdings', 'pnl', 'transactions', 'watchlist'] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-1.5 text-sm rounded-lg transition-all flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 text-sm rounded-lg transition-all flex items-center gap-1.5 ${
                 tab === t ? 'bg-[#172033] text-[#E8EDFB] font-medium' : 'text-[#6B7E9C] hover:text-[#E8EDFB]'
               }`}>
               {t === 'watchlist' && <Star size={11} />}
-              {t === 'holdings' ? '持仓' : t === 'transactions' ? '交易记录' : '自选股'}
-              {t !== 'watchlist' && (
-                <span className="ml-0.5 text-xs text-[#3A4E6A]">
-                  ({t === 'holdings' ? (portfolio?.holdings.length ?? 0) : transactions.length})
-                </span>
-              )}
+              {t === 'holdings' ? '持仓' : t === 'pnl' ? '盈亏记录' : t === 'transactions' ? '交易记录' : '自选股'}
+              {t === 'holdings' && <span className="ml-0.5 text-xs text-[#3A4E6A]">({portfolio?.holdings.length ?? 0})</span>}
+              {t === 'transactions' && <span className="ml-0.5 text-xs text-[#3A4E6A]">({transactions.length})</span>}
             </button>
           ))}
         </div>
@@ -320,44 +384,21 @@ export default function Dashboard() {
                 <span className="hidden sm:inline">{sortDir === 'desc' ? '降序' : '升序'}</span>
               </button>
             </div>
-            <div className="flex flex-wrap gap-2 items-center">
-              <div className="flex items-center gap-1 flex-wrap">
-                <span className="text-xs text-[#6B7E9C] mr-0.5">排序:</span>
-                {SORT_OPTIONS.map(opt => (
-                  <button key={opt.key} onClick={() => setSortBy(opt.key)}
-                    className={`px-2.5 py-1 rounded-lg text-xs transition-all ${sortBy === opt.key ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] border border-[#4F8EF7]/40' : 'text-[#6B7E9C] hover:text-[#E8EDFB] hover:bg-[#172033]'}`}>
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-              <div className="h-4 w-px bg-[#1E2D42] hidden sm:block" />
-              <div className="flex items-center gap-1">
-                <span className="text-xs text-[#6B7E9C] mr-0.5">最小市值:</span>
-                {MIN_VALUE_OPTIONS.map(opt => (
-                  <button key={opt.value} onClick={() => setMinValue(opt.value)}
-                    className={`px-2.5 py-1 rounded-lg text-xs transition-all ${minValue === opt.value ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] border border-[#4F8EF7]/40' : 'text-[#6B7E9C] hover:text-[#E8EDFB] hover:bg-[#172033]'}`}>
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-              <div className="h-4 w-px bg-[#1E2D42] hidden sm:block" />
-              <div className="flex items-center gap-1">
-                <span className="text-xs text-[#6B7E9C] mr-0.5">最小占比:</span>
-                {MIN_ALLOC_OPTIONS.map(opt => (
-                  <button key={opt.value} onClick={() => setMinAlloc(opt.value)}
-                    className={`px-2.5 py-1 rounded-lg text-xs transition-all ${minAlloc === opt.value ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] border border-[#4F8EF7]/40' : 'text-[#6B7E9C] hover:text-[#E8EDFB] hover:bg-[#172033]'}`}>
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+            <div className="flex flex-wrap gap-1 items-center">
+              <span className="text-xs text-[#6B7E9C] mr-0.5">排序:</span>
+              {SORT_OPTIONS.map(opt => (
+                <button key={opt.key} onClick={() => setSortBy(opt.key)}
+                  className={`px-2.5 py-1 rounded-lg text-xs transition-all ${sortBy === opt.key ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] border border-[#4F8EF7]/40' : 'text-[#6B7E9C] hover:text-[#E8EDFB] hover:bg-[#172033]'}`}>
+                  {opt.label}
+                </button>
+              ))}
             </div>
             {hasFilter && (
               <div className="flex items-center justify-between pt-1 border-t border-[#1E2D42]/60">
                 <span className="text-xs text-[#6B7E9C]">
                   显示 <span className="text-[#E8EDFB] font-medium">{filteredHoldings.length}</span> / {portfolio?.holdings.length} 只股票
                 </span>
-                <button onClick={() => { setSearch(''); setMinValue(0); setMinAlloc(0); }}
-                  className="text-xs text-rose-400 hover:text-rose-300 transition-colors">
+                <button onClick={() => setSearch('')} className="text-xs text-rose-400 hover:text-rose-300 transition-colors">
                   清除筛选
                 </button>
               </div>
@@ -378,6 +419,8 @@ export default function Dashboard() {
             onRemove={removeFromWatchlist}
             onNavigate={t => router.push(`/stock/${t}`)}
           />
+        ) : tab === 'pnl' ? (
+          <PnlTab data={pnlData} loading={pnlLoading} onNavigate={t => router.push(`/stock/${t}`)} />
         ) : (
           <div className="bg-[#0F1520] border border-[#1E2D42] rounded-2xl p-4 sm:p-5">
             {tab === 'holdings' ? (
@@ -402,6 +445,152 @@ export default function Dashboard() {
 
       {modal && <TransactionModal onClose={() => setModal(false)} onSaved={load} />}
       {changePwModal && <ChangePasswordModal onClose={() => setChangePwModal(false)} />}
+    </div>
+  );
+}
+
+// ── Portfolio chart sparkline ─────────────────────────────────────────────────
+function PortfolioChart({ points, height, hoverIdx, onHover }: {
+  points: { t: number; p: number }[]; height: number;
+  hoverIdx: number | null; onHover: (i: number | null) => void;
+}) {
+  if (points.length < 2) return null;
+  const prices = points.map(p => p.p);
+  const min = Math.min(...prices), max = Math.max(...prices);
+  const span = max - min || min * 0.001 || 1;
+  const W = 1000, H = height, px = 2, py = 10;
+  const toX = (i: number) => px + (i / (points.length - 1)) * (W - 2 * px);
+  const toY = (p: number) => py + (1 - (p - min) / span) * (H - 2 * py);
+  const isPos = prices[prices.length - 1] >= prices[0];
+  const color = isPos ? '#22C55E' : '#F43F5E';
+  const line = points.map((pt, i) => `${i ? 'L' : 'M'}${toX(i).toFixed(1)},${toY(pt.p).toFixed(1)}`).join(' ');
+  const fill = `${line} L${toX(points.length - 1).toFixed(1)},${H} L${toX(0).toFixed(1)},${H} Z`;
+  function getIdx(cx: number, rect: DOMRect) {
+    return Math.max(0, Math.min(points.length - 1, Math.round(((cx - rect.left) / rect.width) * (points.length - 1))));
+  }
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+      className="w-full cursor-crosshair select-none" style={{ height, touchAction: 'none' }}
+      onMouseMove={e => onHover(getIdx(e.clientX, e.currentTarget.getBoundingClientRect()))}
+      onMouseLeave={() => onHover(null)}
+      onTouchStart={e => { e.preventDefault(); onHover(getIdx(e.touches[0].clientX, e.currentTarget.getBoundingClientRect())); }}
+      onTouchMove={e => { e.preventDefault(); onHover(getIdx(e.touches[0].clientX, e.currentTarget.getBoundingClientRect())); }}
+      onTouchEnd={() => onHover(null)}>
+      <defs>
+        <linearGradient id="pf-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.22" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={fill} fill="url(#pf-fill)" />
+      <path d={line} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+      {hoverIdx != null && (
+        <>
+          <line x1={toX(hoverIdx)} y1={py - 6} x2={toX(hoverIdx)} y2={H} stroke="#4F8EF7" strokeWidth="1" opacity="0.5" />
+          <circle cx={toX(hoverIdx)} cy={toY(points[hoverIdx].p)} r="5" fill="#4F8EF7" stroke="#080B14" strokeWidth="2.5" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+// ── PnL tab ───────────────────────────────────────────────────────────────────
+function PnlTab({ data, loading, onNavigate }: {
+  data: PnlRecord[] | null; loading: boolean; onNavigate: (t: string) => void;
+}) {
+  if (loading || !data) {
+    return (
+      <div className="bg-[#0F1520] border border-[#1E2D42] rounded-2xl divide-y divide-[#1E2D42] overflow-hidden">
+        {[...Array(4)].map((_, i) => <div key={i} className="p-4 h-20 animate-pulse bg-[#172033]/30" />)}
+      </div>
+    );
+  }
+  if (!data.length) {
+    return (
+      <div className="bg-[#0F1520] border border-[#1E2D42] rounded-2xl p-10 text-center">
+        <p className="text-sm text-[#6B7E9C]">暂无交易记录</p>
+      </div>
+    );
+  }
+
+  const totalRealized   = data.reduce((s, r) => s + r.realizedPnl, 0);
+  const totalUnrealized = data.reduce((s, r) => s + r.unrealizedPnl, 0);
+  const totalPnl        = totalRealized + totalUnrealized;
+  const totalPos        = totalPnl >= 0;
+
+  function fmtPnl(n: number) {
+    return `${n >= 0 ? '+' : ''}$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Summary row */}
+      <div className="bg-[#0F1520] border border-[#1E2D42] rounded-2xl p-4 flex flex-wrap gap-4">
+        <div>
+          <p className="text-xs text-[#6B7E9C] mb-0.5">总盈亏</p>
+          <p className={`font-mono font-bold text-lg ${totalPos ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPnl(totalPnl)}</p>
+        </div>
+        <div className="h-10 w-px bg-[#1E2D42]" />
+        <div>
+          <p className="text-xs text-[#6B7E9C] mb-0.5">已实现</p>
+          <p className={`font-mono font-semibold text-sm ${totalRealized >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPnl(totalRealized)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-[#6B7E9C] mb-0.5">未实现</p>
+          <p className={`font-mono font-semibold text-sm ${totalUnrealized >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPnl(totalUnrealized)}</p>
+        </div>
+      </div>
+
+      {/* Per-ticker list */}
+      <div className="bg-[#0F1520] border border-[#1E2D42] rounded-2xl overflow-hidden">
+        {data.map((r, i) => {
+          const isPos = r.totalPnl >= 0;
+          return (
+            <button key={r.ticker} onClick={() => onNavigate(r.ticker)}
+              className={`w-full text-left px-4 py-3.5 hover:bg-[#172033] transition-colors ${i > 0 ? 'border-t border-[#1E2D42]' : ''}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-mono font-bold text-sm text-[#4F8EF7]">{r.ticker}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${r.status === 'open' ? 'bg-emerald-400/10 text-emerald-400' : 'bg-[#172033] text-[#6B7E9C]'}`}>
+                      {r.status === 'open' ? '持有中' : '已清仓'}
+                    </span>
+                    <span className="text-xs text-[#3A4E6A]">持有 {fmtDuration(r.holdingDays)}</span>
+                  </div>
+                  <p className="text-xs text-[#6B7E9C] truncate">{r.name}</p>
+                  {r.status === 'open' && (
+                    <p className="text-xs text-[#3A4E6A] mt-0.5">
+                      {r.currentShares.toFixed(r.currentShares % 1 === 0 ? 0 : 4)} 股 · 均价 ${r.avgCost.toFixed(2)} · 现价 ${r.currentPrice.toFixed(2)}
+                    </p>
+                  )}
+                </div>
+                <div className="text-right shrink-0">
+                  <p className={`font-mono font-bold text-base ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {fmtPnl(r.totalPnl)}
+                  </p>
+                  {(r.realizedPnl !== 0 || r.unrealizedPnl !== 0) && (
+                    <div className="flex gap-2 justify-end mt-0.5">
+                      {r.realizedPnl !== 0 && (
+                        <span className={`text-xs ${r.realizedPnl >= 0 ? 'text-emerald-400/60' : 'text-rose-400/60'}`}>
+                          实 {fmtPnl(r.realizedPnl)}
+                        </span>
+                      )}
+                      {r.unrealizedPnl !== 0 && (
+                        <span className={`text-xs ${r.unrealizedPnl >= 0 ? 'text-emerald-400/60' : 'text-rose-400/60'}`}>
+                          浮 {fmtPnl(r.unrealizedPnl)}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  <p className="text-xs text-[#3A4E6A] mt-0.5">
+                    {r.firstBuyDate.slice(0, 7)} → {r.status === 'open' ? '至今' : r.lastActivityDate.slice(0, 7)}
+                  </p>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
