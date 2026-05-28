@@ -25,6 +25,11 @@ export function getDb(): DatabaseSync {
       notes TEXT DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS watchlist (
+      ticker TEXT PRIMARY KEY,
+      name TEXT NOT NULL DEFAULT '',
+      added_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
   `);
 
   return _db;

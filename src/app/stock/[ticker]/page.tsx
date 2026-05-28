@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, TrendingUp, TrendingDown, ExternalLink, Globe, Users, Target, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, ExternalLink, Globe, Users, Target, ChevronDown, ChevronUp, Star } from 'lucide-react';
 import { format } from 'date-fns';
 import FontSizeToggle from '@/components/FontSizeToggle';
 
@@ -320,8 +320,14 @@ export default function StockDetail() {
   const [chartLoading, setChartLoading] = useState(false);
   const [range, setRange]           = useState<Range>('1d');
   const [hoverIdx, setHoverIdx]     = useState<number | null>(null);
+  const [inWatchlist, setInWatchlist] = useState(false);
 
   useEffect(() => {
+    // Check watchlist status
+    fetch('/api/watchlist').then(r => r.json()).then((items: any[]) => {
+      setInWatchlist(items.some(i => i.ticker === ticker));
+    }).catch(() => {});
+
     async function load() {
       setLoading(true);
       try {
@@ -350,6 +356,20 @@ export default function StockDetail() {
     }
     load();
   }, [ticker]);
+
+  async function toggleWatchlist() {
+    if (inWatchlist) {
+      await fetch(`/api/watchlist/${ticker}`, { method: 'DELETE' });
+      setInWatchlist(false);
+    } else {
+      await fetch('/api/watchlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker, name: data?.quote?.longName ?? ticker }),
+      });
+      setInWatchlist(true);
+    }
+  }
 
   async function handleRange(r: Range) {
     setRange(r); setHoverIdx(null); setChartLoading(true);
@@ -421,6 +441,10 @@ export default function StockDetail() {
                 {q.marketState === 'CLOSED' ? '已收盘' : q.marketState === 'PRE' ? '盘前' : q.marketState === 'POST' ? '盘后' : q.marketState}
               </span>
             )}
+            <button onClick={toggleWatchlist} title={inWatchlist ? '取消自选' : '加入自选'}
+              className={`p-2 rounded-lg transition-colors ${inWatchlist ? 'text-amber-400 hover:text-amber-300' : 'text-[#6B7E9C] hover:text-amber-400'} hover:bg-[#172033]`}>
+              <Star size={16} fill={inWatchlist ? 'currentColor' : 'none'} />
+            </button>
             <FontSizeToggle />
           </div>
         </div>
