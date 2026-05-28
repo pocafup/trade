@@ -45,6 +45,7 @@ export default function Dashboard() {
   const [portfolio, setPortfolio] = useState<{ holdings: Holding[]; summary: Summary } | null>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [modal, setModal] = useState(false);
   const [tab, setTab] = useState<Tab>('holdings');
   const [insight, setInsight] = useState<DailyInsight | null>(null);
@@ -73,14 +74,15 @@ export default function Dashboard() {
   const [pnlData, setPnlData]       = useState<PnlRecord[] | null>(null);
   const [pnlLoading, setPnlLoading] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [pRes, tRes] = await Promise.all([fetch('/api/portfolio'), fetch('/api/transactions')]);
       setPortfolio(await pRes.json());
       setTransactions(await tRes.json());
+      setLastUpdated(new Date());
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -90,19 +92,19 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    load();
+    load(false);
     loadWatchlist();
     fetch('/api/daily-focus').then(r => r.json()).then(setInsight).catch(() => {});
   }, [load, loadWatchlist]);
 
-  // Auto-refresh every 60s, skip when tab is hidden
+  // Silent auto-refresh every 30s — data updates in-place, no loading spinner
   useEffect(() => {
     const tick = () => {
       if (document.hidden) return;
-      load();
-      setPnlData(null); // force PnL re-fetch on next visit to that tab
+      load(true);
+      setPnlData(null);
     };
-    const id = setInterval(tick, 60_000);
+    const id = setInterval(tick, 30_000);
     return () => clearInterval(id);
   }, [load]);
 
@@ -185,7 +187,7 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center gap-1.5">
             <FontSizeToggle />
-            <button onClick={load} className="p-2 rounded-lg hover:bg-[#172033] text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">
+            <button onClick={() => load(false)} className="p-2 rounded-lg hover:bg-[#172033] text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">
               <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
             </button>
             <button onClick={() => setChangePwModal(true)} title="修改账户"
@@ -244,7 +246,10 @@ export default function Dashboard() {
               <div className="p-5 sm:p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-xs text-[#6B7E9C] mb-1 uppercase tracking-wider">总资产</p>
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="text-xs text-[#6B7E9C] uppercase tracking-wider">总资产</p>
+                      {lastUpdated && <p className="text-[10px] text-[#3A4E6A]">更新 {lastUpdated.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</p>}
+                    </div>
                     <p className="text-3xl sm:text-4xl font-bold font-mono tracking-tight">${fmt(s.totalValue)}</p>
                     <div className={`flex items-center gap-2 mt-2 ${pos ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {pos ? <TrendingUp size={14} /> : <TrendingDown size={14} />}

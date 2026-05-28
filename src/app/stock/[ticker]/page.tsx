@@ -391,7 +391,7 @@ export default function StockDetail() {
         if (cd?.prevClose)      setLivePrevClose(cd.prevClose);
       } catch {}
     };
-    const id = setInterval(poll, 30_000);
+    const id = setInterval(poll, 15_000);
     return () => clearInterval(id);
   }, [ticker]);
 

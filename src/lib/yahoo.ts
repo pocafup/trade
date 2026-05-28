@@ -74,7 +74,7 @@ export async function getQuote(ticker: string) {
       marketState: meta.marketState,
     };
 
-    quoteCache.set(ticker, { data, expiry: Date.now() + 60_000 });
+    quoteCache.set(ticker, { data, expiry: Date.now() + 15_000 });
     return data;
   } catch {
     return null;
@@ -114,7 +114,7 @@ export async function getChart(ticker: string, range: string) {
       prevClose: meta.chartPreviousClose ?? null,
     };
 
-    chartCache.set(key, { data, expiry: Date.now() + (range === '1d' ? 60_000 : 5 * 60_000) });
+    chartCache.set(key, { data, expiry: Date.now() + (range === '1d' ? 15_000 : 5 * 60_000) });
     return data;
   } catch {
     return null;
