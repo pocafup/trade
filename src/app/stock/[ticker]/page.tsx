@@ -5,6 +5,34 @@ import { ArrowLeft, TrendingUp, TrendingDown, ExternalLink, Globe, Users, Target
 import { format } from 'date-fns';
 import FontSizeToggle from '@/components/FontSizeToggle';
 
+// ── 可折叠卡片 ─────────────────────────────────────────────────────────────────
+function Section({ id, title, defaultOpen = true, children, noPad = false }: {
+  id: string; title: string; defaultOpen?: boolean; children: React.ReactNode; noPad?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(`sec-${id}`);
+      if (v !== null) setOpen(v === '1');
+    } catch {}
+  }, [id]);
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    try { localStorage.setItem(`sec-${id}`, next ? '1' : '0'); } catch {}
+  }
+  return (
+    <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] overflow-hidden">
+      <button onClick={toggle}
+        className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-[#172033]/50 active:bg-[#172033] transition-colors">
+        <p className="text-xs text-[#6B7E9C] font-medium uppercase tracking-wider">{title}</p>
+        {open ? <ChevronUp size={13} className="text-[#6B7E9C] shrink-0" /> : <ChevronDown size={13} className="text-[#6B7E9C] shrink-0" />}
+      </button>
+      {open && <div className={noPad ? '' : 'px-5 pb-5'}>{children}</div>}
+    </div>
+  );
+}
+
 // ── 辅助函数 ──────────────────────────────────────────────────────────────────
 function fmt(n: number, dec = 2) {
   return n?.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec }) ?? '—';
@@ -118,14 +146,16 @@ function NewsSummary({ summary }: { summary: { day1: any; day3: any; week: any }
   const [showSrc, setShowSrc] = useState(false);
 
   if (!summary) return (
-    <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
-      <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider">智能新闻摘要</p>
-      <div className="space-y-2">
+    <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42]">
+      <div className="flex items-center justify-between px-5 py-3.5">
+        <p className="text-xs text-[#6B7E9C] font-medium uppercase tracking-wider">智能新闻摘要</p>
+      </div>
+      <div className="px-5 pb-5 space-y-2">
         <div className="h-4 w-3/4 rounded bg-[#172033] animate-pulse" />
         <div className="h-4 w-5/6 rounded bg-[#172033] animate-pulse" />
         <div className="h-4 w-2/3 rounded bg-[#172033] animate-pulse" />
+        <p className="text-[10px] text-[#3A4E6A] pt-1">AI 摘要生成中…</p>
       </div>
-      <p className="text-[10px] text-[#3A4E6A] mt-3">AI 摘要生成中…</p>
     </div>
   );
 
@@ -142,21 +172,19 @@ function NewsSummary({ summary }: { summary: { day1: any; day3: any; week: any }
   const hasSummary  = para.length > 0 || bullets.length > 0;
 
   return (
-    <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
-      {/* 标题 + Tab 切换 */}
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-xs text-[#6B7E9C] font-medium uppercase tracking-wider">智能新闻摘要</p>
-        <div className="flex gap-1">
-          {tabs.map((t, i) => (
-            <button key={i} onClick={() => { setTab(i); setShowSrc(false); }}
-              className={`px-2.5 py-1 text-xs rounded-lg transition-all ${
-                tab === i ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] font-medium' : 'text-[#6B7E9C] hover:text-[#E8EDFB]'
-              }`}>
-              {t.label}
-              <span className="ml-1 opacity-50">{t.data.items?.length ?? 0}</span>
-            </button>
-          ))}
-        </div>
+    <Section id="news-ai" title="智能新闻摘要" noPad>
+      <div className="px-5 pb-5">
+      {/* Tab 切换 */}
+      <div className="flex gap-1 mb-4">
+        {tabs.map((t, i) => (
+          <button key={i} onClick={() => { setTab(i); setShowSrc(false); }}
+            className={`px-2.5 py-1 text-xs rounded-lg transition-all ${
+              tab === i ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] font-medium' : 'text-[#6B7E9C] hover:text-[#E8EDFB]'
+            }`}>
+            {t.label}
+            <span className="ml-1 opacity-50">{t.data.items?.length ?? 0}</span>
+          </button>
+        ))}
       </div>
 
       {items.length === 0 ? (
@@ -230,78 +258,67 @@ function NewsSummary({ summary }: { summary: { day1: any; day3: any; week: any }
           ))}
         </ul>
       )}
-    </div>
+      </div>
+    </Section>
   );
 }
 
 // ── 往期财报组件 ───────────────────────────────────────────────────────────────
 function EarningsHistory({ history, ticker }: { history: any[] | null; ticker: string }) {
-  const [open, setOpen] = useState(true);
   if (!history?.length) return null;
-
   return (
-    <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] overflow-hidden">
-      <button onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-5 py-4 hover:bg-[#172033]/50 active:bg-[#172033] transition-colors">
-        <p className="text-xs text-[#6B7E9C] font-medium uppercase tracking-wider">往期财报</p>
-        {open ? <ChevronUp size={14} className="text-[#6B7E9C]" /> : <ChevronDown size={14} className="text-[#6B7E9C]" />}
-      </button>
-
-      {open && (
-        <>
-          <div className="px-5 pb-3 overflow-x-auto">
-            <table className="w-full text-sm min-w-[360px]">
-              <thead>
-                <tr className="text-xs text-[#6B7E9C] border-b border-[#1E2D42]">
-                  <th className="text-left pb-2.5 pr-3 font-medium">季度</th>
-                  <th className="text-right pb-2.5 px-3 font-medium">EPS预期</th>
-                  <th className="text-right pb-2.5 px-3 font-medium">EPS实际</th>
-                  <th className="text-right pb-2.5 px-3 font-medium">超预期</th>
-                  <th className="text-right pb-2.5 pl-3 font-medium">营收</th>
+    <Section id="earnings" title="往期财报" noPad>
+      <div className="px-5 pb-3 overflow-x-auto">
+        <table className="w-full text-sm min-w-[360px]">
+          <thead>
+            <tr className="text-xs text-[#6B7E9C] border-b border-[#1E2D42]">
+              <th className="text-left pb-2.5 pr-3 font-medium">季度</th>
+              <th className="text-right pb-2.5 px-3 font-medium">EPS预期</th>
+              <th className="text-right pb-2.5 px-3 font-medium">EPS实际</th>
+              <th className="text-right pb-2.5 px-3 font-medium">超预期</th>
+              <th className="text-right pb-2.5 pl-3 font-medium">营收</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#1E2D42]/40">
+            {history.map((row: any) => {
+              const beat = row.epsActual != null && row.epsEstimate != null
+                ? row.epsActual - row.epsEstimate : null;
+              const beatPct = beat != null && row.epsEstimate
+                ? (beat / Math.abs(row.epsEstimate)) * 100 : null;
+              const isPos = beatPct != null && beatPct >= 0;
+              return (
+                <tr key={row.period} className="hover:bg-[#172033]/30 transition-colors">
+                  <td className="py-2.5 pr-3 font-mono text-xs font-medium">{fmtQuarter(row.period)}</td>
+                  <td className="py-2.5 px-3 text-right font-mono text-xs text-[#6B7E9C]">
+                    {row.epsEstimate != null ? `$${row.epsEstimate.toFixed(2)}` : '—'}
+                  </td>
+                  <td className="py-2.5 px-3 text-right font-mono text-xs font-medium">
+                    {row.epsActual != null ? `$${row.epsActual.toFixed(2)}` : '—'}
+                  </td>
+                  <td className="py-2.5 px-3 text-right text-xs">
+                    {beatPct != null ? (
+                      <span className={isPos ? 'text-emerald-400' : 'text-rose-400'}>
+                        {isPos ? '+' : ''}{beatPct.toFixed(1)}%
+                      </span>
+                    ) : '—'}
+                  </td>
+                  <td className="py-2.5 pl-3 text-right font-mono text-xs text-[#8B9CC0]">
+                    {row.revenue ? fmtBig(row.revenue) : '—'}
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-[#1E2D42]/40">
-                {history.map((row: any) => {
-                  const beat = row.epsActual != null && row.epsEstimate != null
-                    ? row.epsActual - row.epsEstimate : null;
-                  const beatPct = beat != null && row.epsEstimate
-                    ? (beat / Math.abs(row.epsEstimate)) * 100 : null;
-                  const isPos = beatPct != null && beatPct >= 0;
-                  return (
-                    <tr key={row.period} className="hover:bg-[#172033]/30 transition-colors">
-                      <td className="py-2.5 pr-3 font-mono text-xs font-medium">{fmtQuarter(row.period)}</td>
-                      <td className="py-2.5 px-3 text-right font-mono text-xs text-[#6B7E9C]">
-                        {row.epsEstimate != null ? `$${row.epsEstimate.toFixed(2)}` : '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-mono text-xs font-medium">
-                        {row.epsActual != null ? `$${row.epsActual.toFixed(2)}` : '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-xs">
-                        {beatPct != null ? (
-                          <span className={isPos ? 'text-emerald-400' : 'text-rose-400'}>
-                            {isPos ? '+' : ''}{beatPct.toFixed(1)}%
-                          </span>
-                        ) : '—'}
-                      </td>
-                      <td className="py-2.5 pl-3 text-right font-mono text-xs text-[#8B9CC0]">
-                        {row.revenue ? fmtBig(row.revenue) : '—'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="px-5 py-3 border-t border-[#1E2D42]">
-            <a href={`https://finance.yahoo.com/quote/${ticker}/financials/`}
-              target="_blank" rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-[#4F8EF7] hover:underline">
-              查看完整财务报表 <ExternalLink size={10} />
-            </a>
-          </div>
-        </>
-      )}
-    </div>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="px-5 py-3 border-t border-[#1E2D42]">
+        <a href={`https://finance.yahoo.com/quote/${ticker}/financials/`}
+          target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-[#4F8EF7] hover:underline">
+          查看完整财务报表 <ExternalLink size={10} />
+        </a>
+      </div>
+    </Section>
   );
 }
 
@@ -450,9 +467,9 @@ export default function StockDetail() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 pb-12 pt-5 space-y-3">
+      <main className="max-w-3xl mx-auto px-4 pb-12 pt-5 space-y-2">
         {loading ? (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {[140, 200, 120, 160, 200].map((h, i) => (
               <div key={i} className="rounded-2xl bg-[#0F1520] animate-pulse" style={{ height: h }} />
             ))}
@@ -461,12 +478,9 @@ export default function StockDetail() {
           <>
             {/* 价格 + 52W */}
             {q && (
-              <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
+              <Section id="price" title="当前价格">
                 <div className="flex items-end gap-4 flex-wrap">
-                  <div>
-                    <p className="text-xs text-[#6B7E9C] mb-1">当前价格</p>
-                    <p className="text-4xl font-bold font-mono">${fmt(price)}</p>
-                  </div>
+                  <p className="text-4xl font-bold font-mono">${fmt(price)}</p>
                   <div className={`flex items-center gap-1.5 pb-1 text-lg font-mono ${pos ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {pos ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
                     {pos ? '+' : ''}{fmt(change)} ({pos ? '+' : ''}{fmt(changePct)}%)
@@ -485,84 +499,87 @@ export default function StockDetail() {
                     </div>
                   </div>
                 )}
-              </div>
+              </Section>
             )}
 
             {/* 走势图 */}
-            <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-4 sm:p-5">
-              <div className="flex gap-1 mb-3">
-                {RANGES.map(r => (
-                  <button key={r} onClick={() => handleRange(r)}
-                    className={`flex-1 py-1.5 text-xs rounded-lg transition-all ${
-                      range === r ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] font-semibold' : 'text-[#6B7E9C] hover:text-[#E8EDFB] hover:bg-[#172033]'
-                    }`}>
-                    {RANGE_LABEL[r]}
-                  </button>
-                ))}
-              </div>
-              <div className="h-5 flex items-center mb-1">
-                {hoveredPt ? (
-                  <span className="text-xs font-mono">
-                    <span className="font-semibold text-[#E8EDFB]">${hoveredPt.p.toFixed(2)}</span>
-                    <span className="text-[#6B7E9C] ml-2">{fmtChartTime(hoveredPt.t, range)}</span>
-                  </span>
-                ) : chartData?.points?.length > 0 && (
-                  <span className="text-xs text-[#3A4E6A]">{chartData.points.length} 个数据点</span>
+            <Section id="chart" title="价格走势" noPad>
+              <div className="px-4 sm:px-5 pb-4">
+                <div className="flex gap-1 mb-3 pt-1">
+                  {RANGES.map(r => (
+                    <button key={r} onClick={() => handleRange(r)}
+                      className={`flex-1 py-1.5 text-xs rounded-lg transition-all ${
+                        range === r ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] font-semibold' : 'text-[#6B7E9C] hover:text-[#E8EDFB] hover:bg-[#172033]'
+                      }`}>
+                      {RANGE_LABEL[r]}
+                    </button>
+                  ))}
+                </div>
+                <div className="h-5 flex items-center mb-1">
+                  {hoveredPt ? (
+                    <span className="text-xs font-mono">
+                      <span className="font-semibold text-[#E8EDFB]">${hoveredPt.p.toFixed(2)}</span>
+                      <span className="text-[#6B7E9C] ml-2">{fmtChartTime(hoveredPt.t, range)}</span>
+                    </span>
+                  ) : chartData?.points?.length > 0 && (
+                    <span className="text-xs text-[#3A4E6A]">{chartData.points.length} 个数据点</span>
+                  )}
+                </div>
+                {chartLoading ? (
+                  <div className="h-[140px] rounded-xl bg-[#172033] animate-pulse" />
+                ) : chartData?.points?.length > 1 ? (
+                  <Sparkline points={chartData.points} height={140} hoverIdx={hoverIdx} onHover={setHoverIdx} />
+                ) : (
+                  <div className="h-[140px] flex items-center justify-center text-sm text-[#6B7E9C]">暂无图表数据</div>
                 )}
               </div>
-              {chartLoading ? (
-                <div className="h-[140px] rounded-xl bg-[#172033] animate-pulse" />
-              ) : chartData?.points?.length > 1 ? (
-                <Sparkline points={chartData.points} height={140} hoverIdx={hoverIdx} onHover={setHoverIdx} />
-              ) : (
-                <div className="h-[140px] flex items-center justify-center text-sm text-[#6B7E9C]">暂无图表数据</div>
-              )}
-            </div>
+            </Section>
 
-            {/* 新闻摘要（独立栏目） */}
+            {/* 新闻摘要 */}
             <NewsSummary summary={newsSummary} />
 
             {/* 分析师 + 财报日期 */}
             {(recoInfo || nextEarnings) && (
-              <div className={`grid gap-3 ${recoInfo && nextEarnings ? 'sm:grid-cols-2' : ''}`}>
-                {recoInfo && targetPrice && (
-                  <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-4 sm:p-5">
-                    <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider flex items-center gap-1.5">
-                      <Target size={11} /> 分析师评级
-                    </p>
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg border ${recoInfo.cls}`}>
-                        {recoInfo.label}
-                      </span>
-                      <div className="text-sm font-mono">
-                        <span className="text-[#6B7E9C]">目标价 </span>
-                        <span className="font-semibold">${fmt(targetPrice)}</span>
-                        {upside != null && (
-                          <span className={`ml-1.5 text-xs ${upside >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            ({upside >= 0 ? '+' : ''}{upside.toFixed(1)}%)
-                          </span>
+              <Section id="analyst" title="分析师 · 财报">
+                <div className={`grid gap-4 ${recoInfo && nextEarnings ? 'sm:grid-cols-2' : ''}`}>
+                  {recoInfo && targetPrice && (
+                    <div>
+                      <p className="text-xs text-[#6B7E9C] mb-2 flex items-center gap-1.5">
+                        <Target size={11} /> 分析师评级
+                      </p>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg border ${recoInfo.cls}`}>
+                          {recoInfo.label}
+                        </span>
+                        <div className="text-sm font-mono">
+                          <span className="text-[#6B7E9C]">目标价 </span>
+                          <span className="font-semibold">${fmt(targetPrice)}</span>
+                          {upside != null && (
+                            <span className={`ml-1.5 text-xs ${upside >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              ({upside >= 0 ? '+' : ''}{upside.toFixed(1)}%)
+                            </span>
+                          )}
+                        </div>
+                        {fin?.numberOfAnalystOpinions > 0 && (
+                          <span className="text-xs text-[#3A4E6A]">{fin.numberOfAnalystOpinions} 位分析师</span>
                         )}
                       </div>
-                      {fin?.numberOfAnalystOpinions > 0 && (
-                        <span className="text-xs text-[#3A4E6A]">{fin.numberOfAnalystOpinions} 位分析师</span>
-                      )}
                     </div>
-                  </div>
-                )}
-                {nextEarnings && (
-                  <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-4 sm:p-5">
-                    <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider">下次财报</p>
-                    <p className="font-mono font-semibold">{format(new Date(nextEarnings), 'yyyy年M月d日')}</p>
-                    <p className="text-xs text-[#4F8EF7] mt-1">{daysFrom(nextEarnings)}</p>
-                  </div>
-                )}
-              </div>
+                  )}
+                  {nextEarnings && (
+                    <div>
+                      <p className="text-xs text-[#6B7E9C] mb-2">下次财报</p>
+                      <p className="font-mono font-semibold">{format(new Date(nextEarnings), 'yyyy年M月d日')}</p>
+                      <p className="text-xs text-[#4F8EF7] mt-1">{daysFrom(nextEarnings)}</p>
+                    </div>
+                  )}
+                </div>
+              </Section>
             )}
 
             {/* 我的持仓 */}
             {position && (
-              <div className="rounded-2xl bg-[#172033] border border-[#2A3F60] p-5">
-                <p className="text-xs text-[#4F8EF7] mb-3 font-medium uppercase tracking-wider">我的持仓</p>
+              <Section id="position" title="我的持仓">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   {[
                     { label: '股数',   value: fmt(position.shares, 4).replace(/\.?0+$/, '') },
@@ -580,13 +597,12 @@ export default function StockDetail() {
                     </div>
                   ))}
                 </div>
-              </div>
+              </Section>
             )}
 
             {/* 关键指标 */}
             {keyStats.length > 0 && (
-              <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
-                <p className="text-xs text-[#6B7E9C] mb-4 font-medium uppercase tracking-wider">关键指标</p>
+              <Section id="keystats" title="关键指标">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4">
                   {keyStats.map(({ label, value }) => (
                     <div key={label}>
@@ -595,16 +611,15 @@ export default function StockDetail() {
                     </div>
                   ))}
                 </div>
-              </div>
+              </Section>
             )}
 
-            {/* 往期财报（可折叠） */}
+            {/* 往期财报 */}
             <EarningsHistory history={earningsHistory} ticker={ticker} />
 
-            {/* 公司简介（翻译后） */}
+            {/* 公司简介 */}
             {profile && (profile.sector || descZh) && (
-              <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
-                <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider">公司简介</p>
+              <Section id="profile" title="公司简介">
                 <div className="flex flex-wrap gap-3 mb-3 text-xs text-[#6B7E9C]">
                   {profile.sector && (
                     <span className="flex items-center gap-1">
@@ -621,17 +636,14 @@ export default function StockDetail() {
                     </a>
                   )}
                 </div>
-                {descZh && (
-                  <p className="text-sm text-[#8B9CC0] leading-relaxed line-clamp-6">{descZh}</p>
-                )}
-              </div>
+                {descZh && <p className="text-sm text-[#8B9CC0] leading-relaxed line-clamp-6">{descZh}</p>}
+              </Section>
             )}
 
             {/* 我的交易记录 */}
             {myTxns.length > 0 && (
-              <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
-                <p className="text-xs text-[#6B7E9C] mb-4 font-medium uppercase tracking-wider">我的交易记录</p>
-                <div className="space-y-1">
+              <Section id="txns" title="我的交易记录" noPad>
+                <div className="px-5 pb-3 space-y-0">
                   {myTxns.map((t: any) => {
                     const isBuy = t.type === 'buy';
                     return (
@@ -653,26 +665,27 @@ export default function StockDetail() {
                     );
                   })}
                 </div>
-              </div>
+              </Section>
             )}
 
-            {/* 最新资讯（原文） */}
-            <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
-              <p className="text-xs text-[#6B7E9C] mb-4 font-medium uppercase tracking-wider">最新资讯</p>
-              {news.length === 0 ? (
-                <p className="text-sm text-[#6B7E9C]">暂无最新资讯</p>
-              ) : (
-                <div className="space-y-1">
-                  {news.map((item: any, i: number) => (
-                    <a key={i} href={item.link} target="_blank" rel="noopener noreferrer"
-                      className="block group p-3 rounded-xl hover:bg-[#172033] active:bg-[#172033] transition-colors border border-transparent hover:border-[#2A3F60]">
-                      <p className="text-sm font-medium group-hover:text-[#4F8EF7] transition-colors leading-snug">{item.title}</p>
-                      {item.pubDate && <p className="text-xs text-[#3A4E6A] mt-1">{fmtDate(item.pubDate)}</p>}
-                    </a>
-                  ))}
-                </div>
-              )}
-            </div>
+            {/* 最新资讯 — 默认折叠 */}
+            <Section id="news-raw" title="最新资讯" defaultOpen={false} noPad>
+              <div className="px-5 pb-3">
+                {news.length === 0 ? (
+                  <p className="text-sm text-[#6B7E9C] py-2">暂无最新资讯</p>
+                ) : (
+                  <div className="space-y-1 pt-1">
+                    {news.map((item: any, i: number) => (
+                      <a key={i} href={item.link} target="_blank" rel="noopener noreferrer"
+                        className="block group p-3 rounded-xl hover:bg-[#172033] active:bg-[#172033] transition-colors border border-transparent hover:border-[#2A3F60]">
+                        <p className="text-sm font-medium group-hover:text-[#4F8EF7] transition-colors leading-snug">{item.title}</p>
+                        {item.pubDate && <p className="text-xs text-[#3A4E6A] mt-1">{fmtDate(item.pubDate)}</p>}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Section>
           </>
         )}
       </main>
