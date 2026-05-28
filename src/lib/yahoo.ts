@@ -46,6 +46,7 @@ function raw(v: any): number | null {
 // ── Caches ───────────────────────────────────────────────────────────────────
 const quoteCache = new Map<string, { data: any; expiry: number }>();
 const summaryCache = new Map<string, { data: any; expiry: number }>();
+const chartCache = new Map<string, { data: any; expiry: number }>();
 
 // ── Public API ───────────────────────────────────────────────────────────────
 export async function getQuote(ticker: string) {
@@ -80,6 +81,46 @@ export async function getQuote(ticker: string) {
   }
 }
 
+export async function getChart(ticker: string, range: string) {
+  const key = `${ticker}:${range}`;
+  const cached = chartCache.get(key);
+  if (cached && cached.expiry > Date.now()) return cached.data;
+
+  const intervalMap: Record<string, string> = {
+    '1d': '5m', '5d': '30m', '1mo': '1d', '3mo': '1d', '1y': '1wk', '5y': '1mo',
+  };
+  const interval = intervalMap[range] ?? '1d';
+
+  try {
+    const json = await yfFetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=${interval}&range=${range}`
+    );
+    const result = json?.chart?.result?.[0];
+    if (!result) return null;
+
+    const timestamps: number[] = result.timestamp ?? [];
+    const closes: (number | null)[] = result.indicators?.quote?.[0]?.close ?? [];
+    const points: { t: number; p: number }[] = [];
+    for (let i = 0; i < timestamps.length; i++) {
+      if (closes[i] != null) points.push({ t: timestamps[i] * 1000, p: closes[i]! });
+    }
+
+    const prices = points.map(p => p.p);
+    const meta = result.meta ?? {};
+    const data = {
+      points,
+      high: prices.length ? Math.max(...prices) : 0,
+      low: prices.length ? Math.min(...prices) : 0,
+      prevClose: meta.chartPreviousClose ?? null,
+    };
+
+    chartCache.set(key, { data, expiry: Date.now() + (range === '1d' ? 60_000 : 5 * 60_000) });
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 export async function getQuoteSummary(ticker: string) {
   const cached = summaryCache.get(ticker);
   if (cached && cached.expiry > Date.now()) return cached.data;
@@ -88,7 +129,7 @@ export async function getQuoteSummary(ticker: string) {
     const [chartJson, summaryJson] = await Promise.all([
       yfFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`),
       yfFetch(
-        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=financialData,defaultKeyStatistics,summaryProfile`,
+        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=financialData,defaultKeyStatistics,summaryProfile,calendarEvents,summaryDetail`,
         true
       ).catch(() => null),
     ]);
@@ -97,9 +138,16 @@ export async function getQuoteSummary(ticker: string) {
     const price = meta.regularMarketPrice ?? 0;
     const prevClose = meta.chartPreviousClose ?? price;
 
-    const fin = summaryJson?.quoteSummary?.result?.[0]?.financialData ?? {};
-    const stats = summaryJson?.quoteSummary?.result?.[0]?.defaultKeyStatistics ?? {};
-    const profile = summaryJson?.quoteSummary?.result?.[0]?.summaryProfile ?? {};
+    const r0 = summaryJson?.quoteSummary?.result?.[0] ?? {};
+    const fin = r0.financialData ?? {};
+    const stats = r0.defaultKeyStatistics ?? {};
+    const profile = r0.summaryProfile ?? {};
+    const cal = r0.calendarEvents ?? {};
+    const detail = r0.summaryDetail ?? {};
+
+    const earningsDate: number[] = (cal.earnings?.earningsDate ?? [])
+      .map((d: any) => (typeof d === 'object' && d.raw ? d.raw * 1000 : typeof d === 'number' ? d * 1000 : null))
+      .filter(Boolean) as number[];
 
     const data = {
       quote: {
@@ -119,12 +167,25 @@ export async function getQuoteSummary(ticker: string) {
       summary: {
         financialData: {
           totalRevenue: raw(fin.totalRevenue),
+          revenueGrowth: raw(fin.revenueGrowth),
+          grossMargins: raw(fin.grossMargins),
+          operatingMargins: raw(fin.operatingMargins),
           profitMargins: raw(fin.profitMargins),
           returnOnEquity: raw(fin.returnOnEquity),
+          debtToEquity: raw(fin.debtToEquity),
+          freeCashflow: raw(fin.freeCashflow),
+          targetMeanPrice: raw(fin.targetMeanPrice),
+          recommendationKey: fin.recommendationKey ?? null,
+          numberOfAnalystOpinions: raw(fin.numberOfAnalystOpinions),
         },
         defaultKeyStatistics: {
           forwardPE: raw(stats.forwardPE),
+          forwardEps: raw(stats.forwardEps),
           trailingEps: raw(stats.trailingEps),
+          pegRatio: raw(stats.pegRatio),
+          priceToBook: raw(stats.priceToBook),
+          beta: raw(stats.beta),
+          dividendYield: raw(detail.dividendYield ?? detail.trailingAnnualDividendYield),
         },
         summaryProfile: {
           sector: profile.sector,
@@ -133,6 +194,7 @@ export async function getQuoteSummary(ticker: string) {
           fullTimeEmployees: profile.fullTimeEmployees,
           website: profile.website,
         },
+        calendarEvents: { earningsDate },
       },
     };
 
