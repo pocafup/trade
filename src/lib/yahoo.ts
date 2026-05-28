@@ -129,7 +129,7 @@ export async function getQuoteSummary(ticker: string) {
     const [chartJson, summaryJson] = await Promise.all([
       yfFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`),
       yfFetch(
-        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=financialData,defaultKeyStatistics,summaryProfile,calendarEvents,summaryDetail`,
+        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=financialData,defaultKeyStatistics,summaryProfile,calendarEvents,summaryDetail,earnings`,
         true
       ).catch(() => null),
     ]);
@@ -144,6 +144,18 @@ export async function getQuoteSummary(ticker: string) {
     const profile = r0.summaryProfile ?? {};
     const cal = r0.calendarEvents ?? {};
     const detail = r0.summaryDetail ?? {};
+    const earningsModule = r0.earnings ?? {};
+
+    // Build quarterly earnings history (EPS actual vs estimate + revenue)
+    const qEps: any[]  = earningsModule.earningsChart?.quarterly  ?? [];
+    const qRev: any[]  = earningsModule.financialsChart?.quarterly ?? [];
+    const revMap = new Map(qRev.map((q: any) => [q.date, { revenue: raw(q.revenue), netIncome: raw(q.earnings) }]));
+    const earningsHistory = [...qEps].reverse().map((q: any) => ({
+      period:      q.date,
+      epsActual:   raw(q.actual),
+      epsEstimate: raw(q.estimate),
+      ...(revMap.get(q.date) ?? {}),
+    }));
 
     const earningsDate: number[] = (cal.earnings?.earningsDate ?? [])
       .map((d: any) => (typeof d === 'object' && d.raw ? d.raw * 1000 : typeof d === 'number' ? d * 1000 : null))
@@ -195,6 +207,7 @@ export async function getQuoteSummary(ticker: string) {
           website: profile.website,
         },
         calendarEvents: { earningsDate },
+        earningsHistory,
       },
     };
 

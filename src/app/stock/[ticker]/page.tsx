@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, TrendingUp, TrendingDown, ExternalLink, Globe, Users, Target } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, ExternalLink, Globe, Users, Target, ChevronDown, ChevronUp } from 'lucide-react';
 import { format } from 'date-fns';
 import FontSizeToggle from '@/components/FontSizeToggle';
 
@@ -31,9 +31,16 @@ function daysFrom(ts: number) {
   const d = Math.round((ts - Date.now()) / 86_400_000);
   if (d === 0) return '今天';
   if (d === 1) return '明天';
-  if (d > 0) return `${d} 天后`;
+  if (d > 0)   return `${d} 天后`;
   if (d === -1) return '昨天';
   return `${Math.abs(d)} 天前`;
+}
+function fmtQuarter(q: string) {
+  const m = q.match(/(\d)Q(\d{4})/);
+  return m ? `${m[2]} Q${m[1]}` : q;
+}
+function fmtNewsDate(ts: number) {
+  try { return format(new Date(ts), 'M月d日 HH:mm'); } catch { return ''; }
 }
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────
@@ -50,28 +57,15 @@ type Range = typeof RANGES[number];
 const RANGE_LABEL: Record<Range, string> = { '1d':'1日','5d':'5日','1mo':'1月','3mo':'3月','1y':'1年','5y':'5年' };
 
 const STAT_LABELS: Record<string, string> = {
-  'Market Cap':   '总市值',
-  'P/E (Fwd)':   '市盈率(预期)',
-  'P/E (TTM)':   '市盈率(TTM)',
-  'EPS (TTM)':   '每股收益(TTM)',
-  'EPS (Fwd)':   '每股收益(预期)',
-  'Beta':        '贝塔系数',
-  'Div Yield':   '股息率',
-  'Volume':      '成交量',
-  'Revenue':     '营收',
-  'Rev Growth':  '营收增速',
-  'Gross Margin':'毛利率',
-  'Op. Margin':  '营业利润率',
-  'Profit Margin':'净利润率',
-  'Free Cash Flow':'自由现金流',
-  'Debt/Equity': '负债权益比',
-  'ROE':         '净资产收益率',
+  'Market Cap':'总市值', 'P/E (Fwd)':'市盈率(预期)', 'P/E (TTM)':'市盈率(TTM)',
+  'EPS (TTM)':'每股收益(TTM)', 'EPS (Fwd)':'每股收益(预期)', 'Beta':'贝塔系数',
+  'Div Yield':'股息率', 'Volume':'成交量', 'Revenue':'营收', 'Rev Growth':'营收增速',
+  'Gross Margin':'毛利率', 'Op. Margin':'营业利润率', 'Profit Margin':'净利润率',
+  'Free Cash Flow':'自由现金流', 'Debt/Equity':'负债权益比', 'ROE':'净资产收益率',
 };
 
-// ── 走势图 ─────────────────────────────────────────────────────────────────────
-function Sparkline({
-  points, height, hoverIdx, onHover,
-}: {
+// ── 走势图组件 ─────────────────────────────────────────────────────────────────
+function Sparkline({ points, height, hoverIdx, onHover }: {
   points: { t: number; p: number }[];
   height: number;
   hoverIdx: number | null;
@@ -79,10 +73,9 @@ function Sparkline({
 }) {
   if (points.length < 2) return null;
   const prices = points.map(p => p.p);
-  const min = Math.min(...prices);
-  const max = Math.max(...prices);
+  const min = Math.min(...prices), max = Math.max(...prices);
   const span = max - min || min * 0.001 || 1;
-  const W = 1000; const H = height; const px = 2; const py = 10;
+  const W = 1000, H = height, px = 2, py = 10;
   const toX = (i: number) => px + (i / (points.length - 1)) * (W - 2 * px);
   const toY = (p: number) => py + (1 - (p - min) / span) * (H - 2 * py);
   const isPos = prices[prices.length - 1] >= prices[0];
@@ -90,21 +83,17 @@ function Sparkline({
   const line = points.map((pt, i) => `${i ? 'L' : 'M'}${toX(i).toFixed(1)},${toY(pt.p).toFixed(1)}`).join(' ');
   const fill = `${line} L${toX(points.length - 1).toFixed(1)},${H} L${toX(0).toFixed(1)},${H} Z`;
 
-  function getIdx(clientX: number, rect: DOMRect) {
-    const pct = (clientX - rect.left) / rect.width;
-    return Math.max(0, Math.min(points.length - 1, Math.round(pct * (points.length - 1))));
+  function getIdx(cx: number, rect: DOMRect) {
+    return Math.max(0, Math.min(points.length - 1, Math.round(((cx - rect.left) / rect.width) * (points.length - 1))));
   }
-
   return (
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
-      className="w-full cursor-crosshair select-none"
-      style={{ height, touchAction: 'none' }}
+      className="w-full cursor-crosshair select-none" style={{ height, touchAction: 'none' }}
       onMouseMove={e => onHover(getIdx(e.clientX, e.currentTarget.getBoundingClientRect()))}
       onMouseLeave={() => onHover(null)}
       onTouchStart={e => { e.preventDefault(); onHover(getIdx(e.touches[0].clientX, e.currentTarget.getBoundingClientRect())); }}
       onTouchMove={e => { e.preventDefault(); onHover(getIdx(e.touches[0].clientX, e.currentTarget.getBoundingClientRect())); }}
-      onTouchEnd={() => onHover(null)}
-    >
+      onTouchEnd={() => onHover(null)}>
       <defs>
         <linearGradient id="sfill" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.22" />
@@ -115,13 +104,141 @@ function Sparkline({
       <path d={line} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
       {hoverIdx != null && (
         <>
-          <line x1={toX(hoverIdx)} y1={py - 6} x2={toX(hoverIdx)} y2={H}
-            stroke="#4F8EF7" strokeWidth="1" opacity="0.5" />
-          <circle cx={toX(hoverIdx)} cy={toY(points[hoverIdx].p)}
-            r="5" fill="#4F8EF7" stroke="#080B14" strokeWidth="2.5" />
+          <line x1={toX(hoverIdx)} y1={py - 6} x2={toX(hoverIdx)} y2={H} stroke="#4F8EF7" strokeWidth="1" opacity="0.5" />
+          <circle cx={toX(hoverIdx)} cy={toY(points[hoverIdx].p)} r="5" fill="#4F8EF7" stroke="#080B14" strokeWidth="2.5" />
         </>
       )}
     </svg>
+  );
+}
+
+// ── 新闻摘要组件 ───────────────────────────────────────────────────────────────
+function NewsSummary({ summary }: { summary: { day1: any[]; day3: any[]; week: any[] } | null }) {
+  const [tab, setTab] = useState(0);
+  if (!summary) return (
+    <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
+      <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider">新闻摘要</p>
+      <div className="h-20 animate-pulse bg-[#172033] rounded-xl" />
+    </div>
+  );
+
+  const tabs = [
+    { label: '今日',  items: summary.day1 },
+    { label: '近3天', items: summary.day3 },
+    { label: '本周',  items: summary.week },
+  ];
+  const active = tabs[tab];
+
+  return (
+    <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-[#6B7E9C] font-medium uppercase tracking-wider">新闻摘要</p>
+        <div className="flex gap-1">
+          {tabs.map((t, i) => (
+            <button key={i} onClick={() => setTab(i)}
+              className={`px-2.5 py-1 text-xs rounded-lg transition-all ${
+                tab === i ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] font-medium' : 'text-[#6B7E9C] hover:text-[#E8EDFB]'
+              }`}>
+              {t.label}
+              <span className="ml-1 opacity-50">{t.items.length}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      {active.items.length === 0 ? (
+        <p className="text-sm text-[#6B7E9C]">此时段内暂无相关资讯</p>
+      ) : (
+        <ul className="space-y-3">
+          {active.items.map((item: any, i: number) => (
+            <li key={i}>
+              <a href={item.link} target="_blank" rel="noopener noreferrer"
+                className="group flex items-start gap-2 hover:opacity-80 active:opacity-60 transition-opacity">
+                <span className="text-[#4F8EF7] mt-[3px] shrink-0 text-xs">•</span>
+                <div>
+                  <p className="text-sm text-[#C8D4EC] group-hover:text-[#E8EDFB] transition-colors leading-snug">
+                    {item.titleZh || item.title}
+                  </p>
+                  {item.ts > 0 && (
+                    <p className="text-[10px] text-[#3A4E6A] mt-0.5">{fmtNewsDate(item.ts)}</p>
+                  )}
+                </div>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ── 往期财报组件 ───────────────────────────────────────────────────────────────
+function EarningsHistory({ history, ticker }: { history: any[] | null; ticker: string }) {
+  const [open, setOpen] = useState(true);
+  if (!history?.length) return null;
+
+  return (
+    <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] overflow-hidden">
+      <button onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-[#172033]/50 active:bg-[#172033] transition-colors">
+        <p className="text-xs text-[#6B7E9C] font-medium uppercase tracking-wider">往期财报</p>
+        {open ? <ChevronUp size={14} className="text-[#6B7E9C]" /> : <ChevronDown size={14} className="text-[#6B7E9C]" />}
+      </button>
+
+      {open && (
+        <>
+          <div className="px-5 pb-3 overflow-x-auto">
+            <table className="w-full text-sm min-w-[360px]">
+              <thead>
+                <tr className="text-xs text-[#6B7E9C] border-b border-[#1E2D42]">
+                  <th className="text-left pb-2.5 pr-3 font-medium">季度</th>
+                  <th className="text-right pb-2.5 px-3 font-medium">EPS预期</th>
+                  <th className="text-right pb-2.5 px-3 font-medium">EPS实际</th>
+                  <th className="text-right pb-2.5 px-3 font-medium">超预期</th>
+                  <th className="text-right pb-2.5 pl-3 font-medium">营收</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#1E2D42]/40">
+                {history.map((row: any) => {
+                  const beat = row.epsActual != null && row.epsEstimate != null
+                    ? row.epsActual - row.epsEstimate : null;
+                  const beatPct = beat != null && row.epsEstimate
+                    ? (beat / Math.abs(row.epsEstimate)) * 100 : null;
+                  const isPos = beatPct != null && beatPct >= 0;
+                  return (
+                    <tr key={row.period} className="hover:bg-[#172033]/30 transition-colors">
+                      <td className="py-2.5 pr-3 font-mono text-xs font-medium">{fmtQuarter(row.period)}</td>
+                      <td className="py-2.5 px-3 text-right font-mono text-xs text-[#6B7E9C]">
+                        {row.epsEstimate != null ? `$${row.epsEstimate.toFixed(2)}` : '—'}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono text-xs font-medium">
+                        {row.epsActual != null ? `$${row.epsActual.toFixed(2)}` : '—'}
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-xs">
+                        {beatPct != null ? (
+                          <span className={isPos ? 'text-emerald-400' : 'text-rose-400'}>
+                            {isPos ? '+' : ''}{beatPct.toFixed(1)}%
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="py-2.5 pl-3 text-right font-mono text-xs text-[#8B9CC0]">
+                        {row.revenue ? fmtBig(row.revenue) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="px-5 py-3 border-t border-[#1E2D42]">
+            <a href={`https://finance.yahoo.com/quote/${ticker}/financials/`}
+              target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-[#4F8EF7] hover:underline">
+              查看完整财务报表 <ExternalLink size={10} />
+            </a>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -130,15 +247,16 @@ export default function StockDetail() {
   const { ticker } = useParams<{ ticker: string }>();
   const router = useRouter();
 
-  const [data, setData]           = useState<any>(null);
-  const [news, setNews]           = useState<any[]>([]);
-  const [position, setPosition]   = useState<any>(null);
-  const [myTxns, setMyTxns]       = useState<any[]>([]);
-  const [chartData, setChartData] = useState<any>(null);
-  const [loading, setLoading]     = useState(true);
+  const [data, setData]             = useState<any>(null);
+  const [news, setNews]             = useState<any[]>([]);
+  const [newsSummary, setNewsSummary] = useState<any>(null);
+  const [position, setPosition]     = useState<any>(null);
+  const [myTxns, setMyTxns]         = useState<any[]>([]);
+  const [chartData, setChartData]   = useState<any>(null);
+  const [loading, setLoading]       = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
-  const [range, setRange]         = useState<Range>('1d');
-  const [hoverIdx, setHoverIdx]   = useState<number | null>(null);
+  const [range, setRange]           = useState<Range>('1d');
+  const [hoverIdx, setHoverIdx]     = useState<number | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -151,7 +269,7 @@ export default function StockDetail() {
           fetch(`/api/chart/${ticker}?range=1d`),
           fetch('/api/transactions'),
         ]);
-        const pf = await pfRes.json();
+        const pf      = await pfRes.json();
         const allTxns = await txnRes.json();
         setData(await stockRes.json());
         setNews(await newsRes.json());
@@ -161,20 +279,21 @@ export default function StockDetail() {
       } finally {
         setLoading(false);
       }
+      // News summary loads separately (slower — needs translation)
+      fetch(`/api/news-summary/${ticker}`)
+        .then(r => r.json())
+        .then(setNewsSummary)
+        .catch(() => {});
     }
     load();
   }, [ticker]);
 
   async function handleRange(r: Range) {
-    setRange(r);
-    setHoverIdx(null);
-    setChartLoading(true);
+    setRange(r); setHoverIdx(null); setChartLoading(true);
     try {
       const res = await fetch(`/api/chart/${ticker}?range=${r}`);
       setChartData(await res.json());
-    } finally {
-      setChartLoading(false);
-    }
+    } finally { setChartLoading(false); }
   }
 
   const q       = data?.quote;
@@ -182,6 +301,7 @@ export default function StockDetail() {
   const stats   = data?.summary?.defaultKeyStatistics;
   const profile = data?.summary?.summaryProfile;
   const cal     = data?.summary?.calendarEvents;
+  const earningsHistory: any[] = data?.summary?.earningsHistory ?? [];
 
   const price     = q?.regularMarketPrice ?? 0;
   const change    = q?.regularMarketChange ?? 0;
@@ -198,8 +318,7 @@ export default function StockDetail() {
   const low52  = q?.fiftyTwoWeekLow;
   const hi52   = q?.fiftyTwoWeekHigh;
   const w52Pct = (low52 && hi52 && hi52 > low52)
-    ? Math.max(0, Math.min(100, ((price - low52) / (hi52 - low52)) * 100))
-    : null;
+    ? Math.max(0, Math.min(100, ((price - low52) / (hi52 - low52)) * 100)) : null;
 
   const keyStats = [
     { label: 'Market Cap',    value: q?.marketCap         ? fmtBig(q.marketCap) : null },
@@ -221,6 +340,7 @@ export default function StockDetail() {
   ].filter(s => s.value != null) as { label: string; value: string }[];
 
   const hoveredPt = hoverIdx != null ? chartData?.points?.[hoverIdx] : null;
+  const descZh = profile?.longBusinessSummaryZh || profile?.longBusinessSummary;
 
   return (
     <div className="min-h-screen bg-[#080B14]">
@@ -246,13 +366,13 @@ export default function StockDetail() {
       <main className="max-w-3xl mx-auto px-4 pb-12 pt-5 space-y-3">
         {loading ? (
           <div className="space-y-3">
-            {[140, 200, 120, 200].map((h, i) => (
+            {[140, 200, 120, 160, 200].map((h, i) => (
               <div key={i} className="rounded-2xl bg-[#0F1520] animate-pulse" style={{ height: h }} />
             ))}
           </div>
         ) : (
           <>
-            {/* ── 价格卡片 ── */}
+            {/* 价格 + 52W */}
             {q && (
               <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
                 <div className="flex items-end gap-4 flex-wrap">
@@ -265,8 +385,6 @@ export default function StockDetail() {
                     {pos ? '+' : ''}{fmt(change)} ({pos ? '+' : ''}{fmt(changePct)}%)
                   </div>
                 </div>
-
-                {/* 52周区间 */}
                 {w52Pct != null && (
                   <div className="mt-4 pt-4 border-t border-[#1E2D42]">
                     <div className="flex justify-between text-[10px] font-mono text-[#6B7E9C] mb-1.5">
@@ -274,8 +392,7 @@ export default function StockDetail() {
                       <span>52周高 ${fmt(hi52)}</span>
                     </div>
                     <div className="relative h-1.5 bg-[#172033] rounded-full">
-                      <div className="absolute left-0 h-full bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 rounded-full opacity-40"
-                        style={{ width: '100%' }} />
+                      <div className="absolute left-0 h-full bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 rounded-full opacity-40 w-full" />
                       <div className="absolute w-3 h-3 -mt-[3px] rounded-full bg-white border-2 border-[#4F8EF7] -translate-x-1/2"
                         style={{ left: `${w52Pct}%` }} />
                     </div>
@@ -284,52 +401,41 @@ export default function StockDetail() {
               </div>
             )}
 
-            {/* ── 走势图 ── */}
+            {/* 走势图 */}
             <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-4 sm:p-5">
-              {/* 时间范围 */}
               <div className="flex gap-1 mb-3">
                 {RANGES.map(r => (
                   <button key={r} onClick={() => handleRange(r)}
                     className={`flex-1 py-1.5 text-xs rounded-lg transition-all ${
-                      range === r
-                        ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] font-semibold'
-                        : 'text-[#6B7E9C] hover:text-[#E8EDFB] hover:bg-[#172033]'
+                      range === r ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] font-semibold' : 'text-[#6B7E9C] hover:text-[#E8EDFB] hover:bg-[#172033]'
                     }`}>
                     {RANGE_LABEL[r]}
                   </button>
                 ))}
               </div>
-
-              {/* 悬停价格标签 */}
               <div className="h-5 flex items-center mb-1">
                 {hoveredPt ? (
-                  <span className="text-xs font-mono text-[#E8EDFB]">
-                    <span className="font-semibold">${hoveredPt.p.toFixed(2)}</span>
+                  <span className="text-xs font-mono">
+                    <span className="font-semibold text-[#E8EDFB]">${hoveredPt.p.toFixed(2)}</span>
                     <span className="text-[#6B7E9C] ml-2">{fmtChartTime(hoveredPt.t, range)}</span>
                   </span>
                 ) : chartData?.points?.length > 0 && (
                   <span className="text-xs text-[#3A4E6A]">{chartData.points.length} 个数据点</span>
                 )}
               </div>
-
-              {/* 图表区域 */}
               {chartLoading ? (
                 <div className="h-[140px] rounded-xl bg-[#172033] animate-pulse" />
               ) : chartData?.points?.length > 1 ? (
-                <Sparkline
-                  points={chartData.points}
-                  height={140}
-                  hoverIdx={hoverIdx}
-                  onHover={setHoverIdx}
-                />
+                <Sparkline points={chartData.points} height={140} hoverIdx={hoverIdx} onHover={setHoverIdx} />
               ) : (
-                <div className="h-[140px] flex items-center justify-center text-sm text-[#6B7E9C]">
-                  暂无图表数据
-                </div>
+                <div className="h-[140px] flex items-center justify-center text-sm text-[#6B7E9C]">暂无图表数据</div>
               )}
             </div>
 
-            {/* ── 分析师 + 财报 ── */}
+            {/* 新闻摘要（独立栏目） */}
+            <NewsSummary summary={newsSummary} />
+
+            {/* 分析师 + 财报日期 */}
             {(recoInfo || nextEarnings) && (
               <div className={`grid gap-3 ${recoInfo && nextEarnings ? 'sm:grid-cols-2' : ''}`}>
                 {recoInfo && targetPrice && (
@@ -356,20 +462,17 @@ export default function StockDetail() {
                     </div>
                   </div>
                 )}
-
                 {nextEarnings && (
                   <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-4 sm:p-5">
                     <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider">下次财报</p>
-                    <p className="font-mono font-semibold text-[#E8EDFB]">
-                      {format(new Date(nextEarnings), 'yyyy年M月d日')}
-                    </p>
+                    <p className="font-mono font-semibold">{format(new Date(nextEarnings), 'yyyy年M月d日')}</p>
                     <p className="text-xs text-[#4F8EF7] mt-1">{daysFrom(nextEarnings)}</p>
                   </div>
                 )}
               </div>
             )}
 
-            {/* ── 我的持仓 ── */}
+            {/* 我的持仓 */}
             {position && (
               <div className="rounded-2xl bg-[#172033] border border-[#2A3F60] p-5">
                 <p className="text-xs text-[#4F8EF7] mb-3 font-medium uppercase tracking-wider">我的持仓</p>
@@ -393,7 +496,7 @@ export default function StockDetail() {
               </div>
             )}
 
-            {/* ── 关键指标 ── */}
+            {/* 关键指标 */}
             {keyStats.length > 0 && (
               <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
                 <p className="text-xs text-[#6B7E9C] mb-4 font-medium uppercase tracking-wider">关键指标</p>
@@ -408,21 +511,21 @@ export default function StockDetail() {
               </div>
             )}
 
-            {/* ── 公司简介 ── */}
-            {profile && (profile.sector || profile.longBusinessSummary) && (
+            {/* 往期财报（可折叠） */}
+            <EarningsHistory history={earningsHistory} ticker={ticker} />
+
+            {/* 公司简介（翻译后） */}
+            {profile && (profile.sector || descZh) && (
               <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
                 <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider">公司简介</p>
                 <div className="flex flex-wrap gap-3 mb-3 text-xs text-[#6B7E9C]">
                   {profile.sector && (
                     <span className="flex items-center gap-1">
-                      <BarChartIcon /> {profile.sector}
-                      {profile.industry ? ` · ${profile.industry}` : ''}
+                      <BarChartIcon /> {profile.sector}{profile.industry ? ` · ${profile.industry}` : ''}
                     </span>
                   )}
                   {profile.fullTimeEmployees && (
-                    <span className="flex items-center gap-1">
-                      <Users size={11} /> {profile.fullTimeEmployees.toLocaleString()} 名员工
-                    </span>
+                    <span className="flex items-center gap-1"><Users size={11} /> {profile.fullTimeEmployees.toLocaleString()} 名员工</span>
                   )}
                   {profile.website && (
                     <a href={profile.website} target="_blank" rel="noopener noreferrer"
@@ -431,15 +534,13 @@ export default function StockDetail() {
                     </a>
                   )}
                 </div>
-                {profile.longBusinessSummary && (
-                  <p className="text-sm text-[#8B9CC0] leading-relaxed line-clamp-4">
-                    {profile.longBusinessSummary}
-                  </p>
+                {descZh && (
+                  <p className="text-sm text-[#8B9CC0] leading-relaxed line-clamp-6">{descZh}</p>
                 )}
               </div>
             )}
 
-            {/* ── 我的交易记录 ── */}
+            {/* 我的交易记录 */}
             {myTxns.length > 0 && (
               <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
                 <p className="text-xs text-[#6B7E9C] mb-4 font-medium uppercase tracking-wider">我的交易记录</p>
@@ -447,18 +548,13 @@ export default function StockDetail() {
                   {myTxns.map((t: any) => {
                     const isBuy = t.type === 'buy';
                     return (
-                      <div key={t.id}
-                        className="flex items-center justify-between py-2.5 border-b border-[#1E2D42]/60 last:border-0">
+                      <div key={t.id} className="flex items-center justify-between py-2.5 border-b border-[#1E2D42]/60 last:border-0">
                         <div className="flex items-center gap-3">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                            isBuy ? 'bg-emerald-400/10 text-emerald-400' : 'bg-rose-400/10 text-rose-400'
-                          }`}>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${isBuy ? 'bg-emerald-400/10 text-emerald-400' : 'bg-rose-400/10 text-rose-400'}`}>
                             {isBuy ? '买入' : '卖出'}
                           </span>
                           <div>
-                            <p className="text-sm font-mono">
-                              {t.quantity} 股 × ${fmt(t.price)}
-                            </p>
+                            <p className="text-sm font-mono">{t.quantity} 股 × ${fmt(t.price)}</p>
                             <p className="text-xs text-[#6B7E9C]">{t.date}</p>
                           </div>
                         </div>
@@ -473,22 +569,18 @@ export default function StockDetail() {
               </div>
             )}
 
-            {/* ── 最新资讯 ── */}
+            {/* 最新资讯（原文） */}
             <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
               <p className="text-xs text-[#6B7E9C] mb-4 font-medium uppercase tracking-wider">最新资讯</p>
               {news.length === 0 ? (
                 <p className="text-sm text-[#6B7E9C]">暂无最新资讯</p>
               ) : (
                 <div className="space-y-1">
-                  {news.map((item, i) => (
+                  {news.map((item: any, i: number) => (
                     <a key={i} href={item.link} target="_blank" rel="noopener noreferrer"
                       className="block group p-3 rounded-xl hover:bg-[#172033] active:bg-[#172033] transition-colors border border-transparent hover:border-[#2A3F60]">
-                      <p className="text-sm font-medium group-hover:text-[#4F8EF7] transition-colors leading-snug">
-                        {item.title}
-                      </p>
-                      {item.pubDate && (
-                        <p className="text-xs text-[#3A4E6A] mt-1">{fmtDate(item.pubDate)}</p>
-                      )}
+                      <p className="text-sm font-medium group-hover:text-[#4F8EF7] transition-colors leading-snug">{item.title}</p>
+                      {item.pubDate && <p className="text-xs text-[#3A4E6A] mt-1">{fmtDate(item.pubDate)}</p>}
                     </a>
                   ))}
                 </div>
@@ -508,8 +600,6 @@ function BarChartIcon() {
     </svg>
   );
 }
-
 function fmtDate(dateStr: string) {
-  try { return format(new Date(dateStr), 'M月d日 HH:mm'); }
-  catch { return dateStr; }
+  try { return format(new Date(dateStr), 'M月d日 HH:mm'); } catch { return dateStr; }
 }
