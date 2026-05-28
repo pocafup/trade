@@ -136,8 +136,10 @@ function NewsSummary({ summary }: { summary: { day1: any; day3: any; week: any }
   ];
   const active      = tabs[tab];
   const items: any[]   = active.data.items  ?? [];
-  const bullets: string[] = active.data.summary ?? [];
-  const hasSummary  = bullets.length > 0;
+  const aiSummary      = active.data.summary ?? null;
+  const para: string   = aiSummary?.para ?? '';
+  const bullets: string[] = aiSummary?.bullets ?? [];
+  const hasSummary  = para.length > 0 || bullets.length > 0;
 
   return (
     <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
@@ -161,15 +163,24 @@ function NewsSummary({ summary }: { summary: { day1: any; day3: any; week: any }
         <p className="text-sm text-[#6B7E9C]">此时段内暂无相关资讯</p>
       ) : hasSummary ? (
         <>
+          {/* AI 综合分析段落 */}
+          {para && (
+            <p className="text-sm text-[#C8D4EC] leading-relaxed mb-4 border-b border-[#1E2D42] pb-4">
+              {para}
+            </p>
+          )}
+
           {/* AI bullet points */}
-          <ul className="space-y-3 mb-4">
-            {bullets.map((b, i) => (
-              <li key={i} className="flex items-start gap-2.5">
-                <span className="text-[#4F8EF7] shrink-0 font-bold mt-0.5">•</span>
-                <p className="text-sm text-[#C8D4EC] leading-relaxed">{b}</p>
-              </li>
-            ))}
-          </ul>
+          {bullets.length > 0 && (
+            <ul className="space-y-3 mb-4">
+              {bullets.map((b, i) => (
+                <li key={i} className="flex items-start gap-2.5">
+                  <span className="text-[#4F8EF7] shrink-0 font-bold mt-0.5">•</span>
+                  <p className="text-sm text-[#C8D4EC] leading-relaxed">{b}</p>
+                </li>
+              ))}
+            </ul>
+          )}
 
           {/* 折叠展示原始新闻来源 */}
           <button onClick={() => setShowSrc(s => !s)}
