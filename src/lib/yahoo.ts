@@ -235,6 +235,26 @@ export async function searchTickers(query: string) {
   }
 }
 
+export async function getNewsExpanded(
+  ticker: string
+): Promise<{ title: string; link: string; publisher: string; ts: number }[]> {
+  try {
+    const json = await yfFetch(
+      `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(ticker)}&quotesCount=0&newsCount=30&enableFuzzyQuery=false`
+    );
+    return (json?.news ?? [])
+      .filter((n: any) => n.title && n.providerPublishTime)
+      .map((n: any) => ({
+        title:     n.title as string,
+        link:      (n.link ?? '') as string,
+        publisher: (n.publisher ?? '') as string,
+        ts:        (n.providerPublishTime as number) * 1000,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 export async function getNews(
   ticker: string
 ): Promise<{ title: string; link: string; pubDate: string }[]> {

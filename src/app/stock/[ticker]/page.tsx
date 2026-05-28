@@ -113,54 +113,106 @@ function Sparkline({ points, height, hoverIdx, onHover }: {
 }
 
 // ── 新闻摘要组件 ───────────────────────────────────────────────────────────────
-function NewsSummary({ summary }: { summary: { day1: any[]; day3: any[]; week: any[] } | null }) {
-  const [tab, setTab] = useState(0);
+function NewsSummary({ summary }: { summary: { day1: any; day3: any; week: any } | null }) {
+  const [tab, setTab]         = useState(0);
+  const [showSrc, setShowSrc] = useState(false);
+
   if (!summary) return (
     <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
-      <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider">新闻摘要</p>
-      <div className="h-20 animate-pulse bg-[#172033] rounded-xl" />
+      <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider">智能新闻摘要</p>
+      <div className="space-y-2">
+        <div className="h-4 w-3/4 rounded bg-[#172033] animate-pulse" />
+        <div className="h-4 w-5/6 rounded bg-[#172033] animate-pulse" />
+        <div className="h-4 w-2/3 rounded bg-[#172033] animate-pulse" />
+      </div>
+      <p className="text-[10px] text-[#3A4E6A] mt-3">AI 摘要生成中…</p>
     </div>
   );
 
   const tabs = [
-    { label: '今日',  items: summary.day1 },
-    { label: '近3天', items: summary.day3 },
-    { label: '本周',  items: summary.week },
+    { label: '今日',  data: summary.day1 },
+    { label: '近3天', data: summary.day3 },
+    { label: '本周',  data: summary.week },
   ];
-  const active = tabs[tab];
+  const active      = tabs[tab];
+  const items: any[]   = active.data.items  ?? [];
+  const bullets: string[] = active.data.summary ?? [];
+  const hasSummary  = bullets.length > 0;
 
   return (
     <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
+      {/* 标题 + Tab 切换 */}
       <div className="flex items-center justify-between mb-4">
-        <p className="text-xs text-[#6B7E9C] font-medium uppercase tracking-wider">新闻摘要</p>
+        <p className="text-xs text-[#6B7E9C] font-medium uppercase tracking-wider">智能新闻摘要</p>
         <div className="flex gap-1">
           {tabs.map((t, i) => (
-            <button key={i} onClick={() => setTab(i)}
+            <button key={i} onClick={() => { setTab(i); setShowSrc(false); }}
               className={`px-2.5 py-1 text-xs rounded-lg transition-all ${
                 tab === i ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] font-medium' : 'text-[#6B7E9C] hover:text-[#E8EDFB]'
               }`}>
               {t.label}
-              <span className="ml-1 opacity-50">{t.items.length}</span>
+              <span className="ml-1 opacity-50">{t.data.items?.length ?? 0}</span>
             </button>
           ))}
         </div>
       </div>
-      {active.items.length === 0 ? (
+
+      {items.length === 0 ? (
         <p className="text-sm text-[#6B7E9C]">此时段内暂无相关资讯</p>
+      ) : hasSummary ? (
+        <>
+          {/* AI bullet points */}
+          <ul className="space-y-3 mb-4">
+            {bullets.map((b, i) => (
+              <li key={i} className="flex items-start gap-2.5">
+                <span className="text-[#4F8EF7] shrink-0 font-bold mt-0.5">•</span>
+                <p className="text-sm text-[#C8D4EC] leading-relaxed">{b}</p>
+              </li>
+            ))}
+          </ul>
+
+          {/* 折叠展示原始新闻来源 */}
+          <button onClick={() => setShowSrc(s => !s)}
+            className="flex items-center gap-1.5 text-xs text-[#3A4E6A] hover:text-[#6B7E9C] transition-colors mb-2">
+            {showSrc ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+            {showSrc ? '收起' : `查看 ${items.length} 条原始资讯`}
+          </button>
+          {showSrc && (
+            <ul className="space-y-1.5 border-t border-[#1E2D42]/60 pt-3">
+              {items.map((item: any, i: number) => (
+                <li key={i}>
+                  <a href={item.link} target="_blank" rel="noopener noreferrer"
+                    className="group flex items-start gap-2 hover:opacity-75 transition-opacity">
+                    <span className="text-[#3A4E6A] mt-[3px] shrink-0 text-[10px]">•</span>
+                    <div>
+                      <p className="text-xs text-[#6B7E9C] group-hover:text-[#8B9CC0] leading-snug">
+                        {item.titleZh || item.title}
+                      </p>
+                      <p className="text-[10px] text-[#2A3A54] mt-0.5">
+                        {item.publisher}  {fmtNewsDate(item.ts)}
+                      </p>
+                    </div>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       ) : (
+        /* 兜底：无 Gemini Key 时显示翻译标题 */
         <ul className="space-y-3">
-          {active.items.map((item: any, i: number) => (
+          {items.map((item: any, i: number) => (
             <li key={i}>
               <a href={item.link} target="_blank" rel="noopener noreferrer"
-                className="group flex items-start gap-2 hover:opacity-80 active:opacity-60 transition-opacity">
+                className="group flex items-start gap-2 hover:opacity-80 transition-opacity">
                 <span className="text-[#4F8EF7] mt-[3px] shrink-0 text-xs">•</span>
                 <div>
-                  <p className="text-sm text-[#C8D4EC] group-hover:text-[#E8EDFB] transition-colors leading-snug">
+                  <p className="text-sm text-[#C8D4EC] group-hover:text-[#E8EDFB] leading-snug">
                     {item.titleZh || item.title}
                   </p>
-                  {item.ts > 0 && (
-                    <p className="text-[10px] text-[#3A4E6A] mt-0.5">{fmtNewsDate(item.ts)}</p>
-                  )}
+                  <p className="text-[10px] text-[#3A4E6A] mt-0.5">
+                    {item.publisher}  {fmtNewsDate(item.ts)}
+                  </p>
                 </div>
               </a>
             </li>

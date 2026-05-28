@@ -8,6 +8,7 @@ services:
       - trade_data:/app/data
     environment:
       - DB_PATH=/app/data/trade.db
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     restart: unless-stopped
 
 volumes:
