@@ -3,8 +3,9 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, TrendingUp, TrendingDown, ExternalLink, Globe, Users, Target } from 'lucide-react';
 import { format } from 'date-fns';
+import FontSizeToggle from '@/components/FontSizeToggle';
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── 辅助函数 ──────────────────────────────────────────────────────────────────
 function fmt(n: number, dec = 2) {
   return n?.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec }) ?? '—';
 }
@@ -21,34 +22,53 @@ function fmtChartTime(ts: number, range: string) {
   try {
     const d = new Date(ts);
     if (range === '1d') return format(d, 'HH:mm');
-    if (range === '5d') return format(d, 'EEE HH:mm');
-    if (range === '1y' || range === '5y') return format(d, 'MMM d, yyyy');
-    return format(d, 'MMM d');
+    if (range === '5d') return format(d, 'M月d日 HH:mm');
+    if (range === '1y' || range === '5y') return format(d, 'yyyy年M月d日');
+    return format(d, 'M月d日');
   } catch { return ''; }
 }
 function daysFrom(ts: number) {
   const d = Math.round((ts - Date.now()) / 86_400_000);
-  if (d === 0) return 'Today';
-  if (d === 1) return 'Tomorrow';
-  if (d > 0) return `in ${d} days`;
-  if (d === -1) return 'Yesterday';
-  return `${Math.abs(d)} days ago`;
+  if (d === 0) return '今天';
+  if (d === 1) return '明天';
+  if (d > 0) return `${d} 天后`;
+  if (d === -1) return '昨天';
+  return `${Math.abs(d)} 天前`;
 }
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ── 常量 ───────────────────────────────────────────────────────────────────────
 const RECO: Record<string, { label: string; cls: string }> = {
-  strong_buy:  { label: 'Strong Buy',  cls: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30' },
-  buy:         { label: 'Buy',         cls: 'text-green-400 bg-green-400/10 border-green-400/30' },
-  hold:        { label: 'Hold',        cls: 'text-amber-400 bg-amber-400/10 border-amber-400/30' },
-  underperform:{ label: 'Underperform',cls: 'text-orange-400 bg-orange-400/10 border-orange-400/30' },
-  sell:        { label: 'Sell',        cls: 'text-rose-400 bg-rose-400/10 border-rose-400/30' },
+  strong_buy:   { label: '强力买入', cls: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30' },
+  buy:          { label: '买入',     cls: 'text-green-400 bg-green-400/10 border-green-400/30' },
+  hold:         { label: '持有',     cls: 'text-amber-400 bg-amber-400/10 border-amber-400/30' },
+  underperform: { label: '表现不佳', cls: 'text-orange-400 bg-orange-400/10 border-orange-400/30' },
+  sell:         { label: '卖出',     cls: 'text-rose-400 bg-rose-400/10 border-rose-400/30' },
 };
 
 const RANGES = ['1d', '5d', '1mo', '3mo', '1y', '5y'] as const;
 type Range = typeof RANGES[number];
-const RANGE_LABEL: Record<Range, string> = { '1d':'1D','5d':'5D','1mo':'1M','3mo':'3M','1y':'1Y','5y':'5Y' };
+const RANGE_LABEL: Record<Range, string> = { '1d':'1日','5d':'5日','1mo':'1月','3mo':'3月','1y':'1年','5y':'5年' };
 
-// ── Sparkline ─────────────────────────────────────────────────────────────────
+const STAT_LABELS: Record<string, string> = {
+  'Market Cap':   '总市值',
+  'P/E (Fwd)':   '市盈率(预期)',
+  'P/E (TTM)':   '市盈率(TTM)',
+  'EPS (TTM)':   '每股收益(TTM)',
+  'EPS (Fwd)':   '每股收益(预期)',
+  'Beta':        '贝塔系数',
+  'Div Yield':   '股息率',
+  'Volume':      '成交量',
+  'Revenue':     '营收',
+  'Rev Growth':  '营收增速',
+  'Gross Margin':'毛利率',
+  'Op. Margin':  '营业利润率',
+  'Profit Margin':'净利润率',
+  'Free Cash Flow':'自由现金流',
+  'Debt/Equity': '负债权益比',
+  'ROE':         '净资产收益率',
+};
+
+// ── 走势图 ─────────────────────────────────────────────────────────────────────
 function Sparkline({
   points, height, hoverIdx, onHover,
 }: {
@@ -70,16 +90,21 @@ function Sparkline({
   const line = points.map((pt, i) => `${i ? 'L' : 'M'}${toX(i).toFixed(1)},${toY(pt.p).toFixed(1)}`).join(' ');
   const fill = `${line} L${toX(points.length - 1).toFixed(1)},${H} L${toX(0).toFixed(1)},${H} Z`;
 
-  function handleMove(e: React.MouseEvent<SVGSVGElement>) {
-    const r = e.currentTarget.getBoundingClientRect();
-    const pct = (e.clientX - r.left) / r.width;
-    onHover(Math.max(0, Math.min(points.length - 1, Math.round(pct * (points.length - 1)))));
+  function getIdx(clientX: number, rect: DOMRect) {
+    const pct = (clientX - rect.left) / rect.width;
+    return Math.max(0, Math.min(points.length - 1, Math.round(pct * (points.length - 1))));
   }
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
-      className="w-full cursor-crosshair" style={{ height }}
-      onMouseMove={handleMove} onMouseLeave={() => onHover(null)}>
+      className="w-full cursor-crosshair select-none"
+      style={{ height, touchAction: 'none' }}
+      onMouseMove={e => onHover(getIdx(e.clientX, e.currentTarget.getBoundingClientRect()))}
+      onMouseLeave={() => onHover(null)}
+      onTouchStart={e => { e.preventDefault(); onHover(getIdx(e.touches[0].clientX, e.currentTarget.getBoundingClientRect())); }}
+      onTouchMove={e => { e.preventDefault(); onHover(getIdx(e.touches[0].clientX, e.currentTarget.getBoundingClientRect())); }}
+      onTouchEnd={() => onHover(null)}
+    >
       <defs>
         <linearGradient id="sfill" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.22" />
@@ -100,7 +125,7 @@ function Sparkline({
   );
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+// ── 主页面 ─────────────────────────────────────────────────────────────────────
 export default function StockDetail() {
   const { ticker } = useParams<{ ticker: string }>();
   const router = useRouter();
@@ -170,8 +195,8 @@ export default function StockDetail() {
   const earningsDates: number[] = cal?.earningsDate ?? [];
   const nextEarnings = earningsDates.find(d => d > Date.now()) ?? null;
 
-  const low52 = q?.fiftyTwoWeekLow;
-  const hi52  = q?.fiftyTwoWeekHigh;
+  const low52  = q?.fiftyTwoWeekLow;
+  const hi52   = q?.fiftyTwoWeekHigh;
   const w52Pct = (low52 && hi52 && hi52 > low52)
     ? Math.max(0, Math.min(100, ((price - low52) / (hi52 - low52)) * 100))
     : null;
@@ -207,11 +232,14 @@ export default function StockDetail() {
           </button>
           <span className="font-mono font-bold text-[#4F8EF7]">{ticker}</span>
           {q && <span className="text-sm text-[#6B7E9C] truncate">{q.longName}</span>}
-          {q?.marketState && q.marketState !== 'REGULAR' && (
-            <span className="ml-auto text-[10px] px-2 py-0.5 rounded bg-[#172033] text-[#6B7E9C] border border-[#1E2D42]">
-              {q.marketState}
-            </span>
-          )}
+          <div className="ml-auto flex items-center gap-2">
+            {q?.marketState && q.marketState !== 'REGULAR' && (
+              <span className="text-[10px] px-2 py-0.5 rounded bg-[#172033] text-[#6B7E9C] border border-[#1E2D42]">
+                {q.marketState === 'CLOSED' ? '已收盘' : q.marketState === 'PRE' ? '盘前' : q.marketState === 'POST' ? '盘后' : q.marketState}
+              </span>
+            )}
+            <FontSizeToggle />
+          </div>
         </div>
       </header>
 
@@ -224,12 +252,12 @@ export default function StockDetail() {
           </div>
         ) : (
           <>
-            {/* ── Price card ── */}
+            {/* ── 价格卡片 ── */}
             {q && (
               <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
                 <div className="flex items-end gap-4 flex-wrap">
                   <div>
-                    <p className="text-xs text-[#6B7E9C] mb-1">Current Price</p>
+                    <p className="text-xs text-[#6B7E9C] mb-1">当前价格</p>
                     <p className="text-4xl font-bold font-mono">${fmt(price)}</p>
                   </div>
                   <div className={`flex items-center gap-1.5 pb-1 text-lg font-mono ${pos ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -238,12 +266,12 @@ export default function StockDetail() {
                   </div>
                 </div>
 
-                {/* 52W range bar */}
+                {/* 52周区间 */}
                 {w52Pct != null && (
                   <div className="mt-4 pt-4 border-t border-[#1E2D42]">
                     <div className="flex justify-between text-[10px] font-mono text-[#6B7E9C] mb-1.5">
-                      <span>52W Low ${fmt(low52)}</span>
-                      <span>52W High ${fmt(hi52)}</span>
+                      <span>52周低 ${fmt(low52)}</span>
+                      <span>52周高 ${fmt(hi52)}</span>
                     </div>
                     <div className="relative h-1.5 bg-[#172033] rounded-full">
                       <div className="absolute left-0 h-full bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 rounded-full opacity-40"
@@ -256,13 +284,13 @@ export default function StockDetail() {
               </div>
             )}
 
-            {/* ── Chart ── */}
+            {/* ── 走势图 ── */}
             <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-4 sm:p-5">
-              {/* Range tabs */}
+              {/* 时间范围 */}
               <div className="flex gap-1 mb-3">
                 {RANGES.map(r => (
                   <button key={r} onClick={() => handleRange(r)}
-                    className={`flex-1 py-1 text-xs rounded-lg transition-all ${
+                    className={`flex-1 py-1.5 text-xs rounded-lg transition-all ${
                       range === r
                         ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] font-semibold'
                         : 'text-[#6B7E9C] hover:text-[#E8EDFB] hover:bg-[#172033]'
@@ -272,7 +300,7 @@ export default function StockDetail() {
                 ))}
               </div>
 
-              {/* Hover price badge */}
+              {/* 悬停价格标签 */}
               <div className="h-5 flex items-center mb-1">
                 {hoveredPt ? (
                   <span className="text-xs font-mono text-[#E8EDFB]">
@@ -280,13 +308,11 @@ export default function StockDetail() {
                     <span className="text-[#6B7E9C] ml-2">{fmtChartTime(hoveredPt.t, range)}</span>
                   </span>
                 ) : chartData?.points?.length > 0 && (
-                  <span className="text-xs font-mono text-[#6B7E9C]">
-                    {chartData.points.length} data points
-                  </span>
+                  <span className="text-xs text-[#3A4E6A]">{chartData.points.length} 个数据点</span>
                 )}
               </div>
 
-              {/* Chart area */}
+              {/* 图表区域 */}
               {chartLoading ? (
                 <div className="h-[140px] rounded-xl bg-[#172033] animate-pulse" />
               ) : chartData?.points?.length > 1 ? (
@@ -298,25 +324,25 @@ export default function StockDetail() {
                 />
               ) : (
                 <div className="h-[140px] flex items-center justify-center text-sm text-[#6B7E9C]">
-                  No chart data
+                  暂无图表数据
                 </div>
               )}
             </div>
 
-            {/* ── Analyst + Earnings row ── */}
+            {/* ── 分析师 + 财报 ── */}
             {(recoInfo || nextEarnings) && (
               <div className={`grid gap-3 ${recoInfo && nextEarnings ? 'sm:grid-cols-2' : ''}`}>
                 {recoInfo && targetPrice && (
                   <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-4 sm:p-5">
                     <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider flex items-center gap-1.5">
-                      <Target size={11} /> Analyst Consensus
+                      <Target size={11} /> 分析师评级
                     </p>
                     <div className="flex items-center gap-3 flex-wrap">
                       <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg border ${recoInfo.cls}`}>
                         {recoInfo.label}
                       </span>
                       <div className="text-sm font-mono">
-                        <span className="text-[#6B7E9C]">Target </span>
+                        <span className="text-[#6B7E9C]">目标价 </span>
                         <span className="font-semibold">${fmt(targetPrice)}</span>
                         {upside != null && (
                           <span className={`ml-1.5 text-xs ${upside >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -325,7 +351,7 @@ export default function StockDetail() {
                         )}
                       </div>
                       {fin?.numberOfAnalystOpinions > 0 && (
-                        <span className="text-xs text-[#3A4E6A]">{fin.numberOfAnalystOpinions} analysts</span>
+                        <span className="text-xs text-[#3A4E6A]">{fin.numberOfAnalystOpinions} 位分析师</span>
                       )}
                     </div>
                   </div>
@@ -333,9 +359,9 @@ export default function StockDetail() {
 
                 {nextEarnings && (
                   <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-4 sm:p-5">
-                    <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider">Next Earnings</p>
+                    <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider">下次财报</p>
                     <p className="font-mono font-semibold text-[#E8EDFB]">
-                      {format(new Date(nextEarnings), 'MMM d, yyyy')}
+                      {format(new Date(nextEarnings), 'yyyy年M月d日')}
                     </p>
                     <p className="text-xs text-[#4F8EF7] mt-1">{daysFrom(nextEarnings)}</p>
                   </div>
@@ -343,17 +369,17 @@ export default function StockDetail() {
               </div>
             )}
 
-            {/* ── Your position ── */}
+            {/* ── 我的持仓 ── */}
             {position && (
               <div className="rounded-2xl bg-[#172033] border border-[#2A3F60] p-5">
-                <p className="text-xs text-[#4F8EF7] mb-3 font-medium uppercase tracking-wider">Your Position</p>
+                <p className="text-xs text-[#4F8EF7] mb-3 font-medium uppercase tracking-wider">我的持仓</p>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   {[
-                    { label: 'Shares',       value: fmt(position.shares, 4).replace(/\.?0+$/, '') },
-                    { label: 'Avg Cost',     value: `$${fmt(position.avgCost)}` },
-                    { label: 'Market Value', value: `$${fmt(position.currentValue)}` },
+                    { label: '股数',   value: fmt(position.shares, 4).replace(/\.?0+$/, '') },
+                    { label: '成本价', value: `$${fmt(position.avgCost)}` },
+                    { label: '市值',   value: `$${fmt(position.currentValue)}` },
                     {
-                      label: 'Total P&L',
+                      label: '持仓盈亏',
                       value: `${position.pnl >= 0 ? '+' : ''}$${fmt(position.pnl)} (${position.pnl >= 0 ? '+' : ''}${fmt(position.pnlPct)}%)`,
                       cls: position.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400',
                     },
@@ -367,14 +393,14 @@ export default function StockDetail() {
               </div>
             )}
 
-            {/* ── Key stats ── */}
+            {/* ── 关键指标 ── */}
             {keyStats.length > 0 && (
               <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
-                <p className="text-xs text-[#6B7E9C] mb-4 font-medium uppercase tracking-wider">Key Stats</p>
+                <p className="text-xs text-[#6B7E9C] mb-4 font-medium uppercase tracking-wider">关键指标</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4">
                   {keyStats.map(({ label, value }) => (
                     <div key={label}>
-                      <p className="text-xs text-[#6B7E9C] mb-0.5">{label}</p>
+                      <p className="text-xs text-[#6B7E9C] mb-0.5">{STAT_LABELS[label] ?? label}</p>
                       <p className="font-mono text-sm font-medium">{value}</p>
                     </div>
                   ))}
@@ -382,10 +408,10 @@ export default function StockDetail() {
               </div>
             )}
 
-            {/* ── About ── */}
+            {/* ── 公司简介 ── */}
             {profile && (profile.sector || profile.longBusinessSummary) && (
               <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
-                <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider">About</p>
+                <p className="text-xs text-[#6B7E9C] mb-3 font-medium uppercase tracking-wider">公司简介</p>
                 <div className="flex flex-wrap gap-3 mb-3 text-xs text-[#6B7E9C]">
                   {profile.sector && (
                     <span className="flex items-center gap-1">
@@ -395,13 +421,13 @@ export default function StockDetail() {
                   )}
                   {profile.fullTimeEmployees && (
                     <span className="flex items-center gap-1">
-                      <Users size={11} /> {profile.fullTimeEmployees.toLocaleString()} employees
+                      <Users size={11} /> {profile.fullTimeEmployees.toLocaleString()} 名员工
                     </span>
                   )}
                   {profile.website && (
                     <a href={profile.website} target="_blank" rel="noopener noreferrer"
                       className="flex items-center gap-1 text-[#4F8EF7] hover:underline">
-                      <Globe size={11} /> Website <ExternalLink size={10} />
+                      <Globe size={11} /> 官网 <ExternalLink size={10} />
                     </a>
                   )}
                 </div>
@@ -413,32 +439,32 @@ export default function StockDetail() {
               </div>
             )}
 
-            {/* ── My transactions ── */}
+            {/* ── 我的交易记录 ── */}
             {myTxns.length > 0 && (
               <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
-                <p className="text-xs text-[#6B7E9C] mb-4 font-medium uppercase tracking-wider">My Transactions</p>
-                <div className="space-y-2">
+                <p className="text-xs text-[#6B7E9C] mb-4 font-medium uppercase tracking-wider">我的交易记录</p>
+                <div className="space-y-1">
                   {myTxns.map((t: any) => {
                     const isBuy = t.type === 'buy';
                     return (
                       <div key={t.id}
-                        className="flex items-center justify-between py-2 border-b border-[#1E2D42]/60 last:border-0">
+                        className="flex items-center justify-between py-2.5 border-b border-[#1E2D42]/60 last:border-0">
                         <div className="flex items-center gap-3">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                             isBuy ? 'bg-emerald-400/10 text-emerald-400' : 'bg-rose-400/10 text-rose-400'
                           }`}>
-                            {t.type.toUpperCase()}
+                            {isBuy ? '买入' : '卖出'}
                           </span>
                           <div>
                             <p className="text-sm font-mono">
-                              {t.quantity} × ${fmt(t.price)}
+                              {t.quantity} 股 × ${fmt(t.price)}
                             </p>
                             <p className="text-xs text-[#6B7E9C]">{t.date}</p>
                           </div>
                         </div>
                         <div className="text-right">
                           <p className="text-sm font-mono font-medium">${fmt(t.quantity * t.price)}</p>
-                          {t.notes && <p className="text-xs text-[#3A4E6A] truncate max-w-[120px]">{t.notes}</p>}
+                          {t.notes && <p className="text-xs text-[#3A4E6A] truncate max-w-[100px]">{t.notes}</p>}
                         </div>
                       </div>
                     );
@@ -447,16 +473,16 @@ export default function StockDetail() {
               </div>
             )}
 
-            {/* ── News ── */}
+            {/* ── 最新资讯 ── */}
             <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5">
-              <p className="text-xs text-[#6B7E9C] mb-4 font-medium uppercase tracking-wider">Latest News</p>
+              <p className="text-xs text-[#6B7E9C] mb-4 font-medium uppercase tracking-wider">最新资讯</p>
               {news.length === 0 ? (
-                <p className="text-sm text-[#6B7E9C]">No recent news found.</p>
+                <p className="text-sm text-[#6B7E9C]">暂无最新资讯</p>
               ) : (
                 <div className="space-y-1">
                   {news.map((item, i) => (
                     <a key={i} href={item.link} target="_blank" rel="noopener noreferrer"
-                      className="block group p-3 rounded-xl hover:bg-[#172033] transition-colors border border-transparent hover:border-[#2A3F60]">
+                      className="block group p-3 rounded-xl hover:bg-[#172033] active:bg-[#172033] transition-colors border border-transparent hover:border-[#2A3F60]">
                       <p className="text-sm font-medium group-hover:text-[#4F8EF7] transition-colors leading-snug">
                         {item.title}
                       </p>
@@ -484,6 +510,6 @@ function BarChartIcon() {
 }
 
 function fmtDate(dateStr: string) {
-  try { return format(new Date(dateStr), 'MMM d, yyyy · h:mm a'); }
+  try { return format(new Date(dateStr), 'M月d日 HH:mm'); }
   catch { return dateStr; }
 }

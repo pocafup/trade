@@ -71,7 +71,7 @@ export default function TransactionModal({ onClose, onSaved }: Props) {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full sm:max-w-md bg-[#0F1520] border border-[#1E2D42] rounded-t-2xl sm:rounded-2xl shadow-2xl">
         <div className="flex items-center justify-between p-5 border-b border-[#1E2D42]">
-          <h2 className="text-base font-semibold">Record Trade</h2>
+          <h2 className="text-base font-semibold">记录交易</h2>
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-[#172033] transition-colors">
             <X size={18} className="text-[#6B7E9C]" />
           </button>
@@ -79,24 +79,24 @@ export default function TransactionModal({ onClose, onSaved }: Props) {
 
         {step === 'search' ? (
           <div className="p-5">
-            <p className="text-sm text-[#6B7E9C] mb-3">Search for a stock ticker</p>
+            <p className="text-sm text-[#6B7E9C] mb-3">搜索股票名称或代码</p>
             <div className="relative">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7E9C]" />
               <input
                 autoFocus
                 value={search}
                 onChange={(e) => setSearch(e.target.value.toUpperCase())}
-                placeholder="AAPL, NVDA, TSLA..."
+                placeholder="AAPL、NVDA、TSLA…"
                 className="w-full pl-9 pr-4 py-2.5 rounded-lg bg-[#141C2C] border border-[#1E2D42] text-sm font-mono focus:outline-none focus:border-[#4F8EF7] placeholder:text-[#3A4E6A]"
               />
             </div>
             <div className="mt-2 space-y-0.5 max-h-56 overflow-y-auto">
-              {loading && <p className="py-3 text-center text-sm text-[#6B7E9C]">Searching...</p>}
+              {loading && <p className="py-3 text-center text-sm text-[#6B7E9C]">搜索中…</p>}
               {results.map((r) => (
                 <button
                   key={r.symbol}
                   onClick={() => pickTicker(r)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[#172033] text-left transition-colors"
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[#172033] active:bg-[#172033] text-left transition-colors"
                 >
                   <span className="font-mono text-sm font-medium text-[#4F8EF7] w-16 shrink-0">{r.symbol}</span>
                   <span className="text-sm text-[#8B9CC0] truncate">{r.name}</span>
@@ -108,18 +108,20 @@ export default function TransactionModal({ onClose, onSaved }: Props) {
         ) : (
           <form onSubmit={submit} className="p-5 space-y-4">
             <div className="flex items-center gap-2 mb-1">
-              <button type="button" onClick={() => setStep('search')} className="text-xs text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">← back</button>
+              <button type="button" onClick={() => setStep('search')}
+                className="text-xs text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">← 返回</button>
               <span className="font-mono text-sm font-semibold text-[#4F8EF7]">{ticker}</span>
               <span className="text-sm text-[#6B7E9C] truncate">{tickerName}</span>
             </div>
 
+            {/* 买入 / 卖出 切换 */}
             <div className="grid grid-cols-2 gap-1 p-1 bg-[#141C2C] rounded-xl">
               {(['buy', 'sell'] as const).map((t) => (
                 <button
                   key={t}
                   type="button"
                   onClick={() => setType(t)}
-                  className={`py-2 rounded-lg text-sm font-medium transition-all capitalize flex items-center justify-center gap-1.5 ${
+                  className={`py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-1.5 ${
                     type === t
                       ? t === 'buy'
                         ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
@@ -128,17 +130,18 @@ export default function TransactionModal({ onClose, onSaved }: Props) {
                   }`}
                 >
                   {t === 'buy' ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                  {t}
+                  {t === 'buy' ? '买入' : '卖出'}
                 </button>
               ))}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
-                <span className="text-xs text-[#6B7E9C] mb-1.5 block">Shares</span>
+                <span className="text-xs text-[#6B7E9C] mb-1.5 block">股数</span>
                 <input
                   required
                   type="number"
+                  inputMode="decimal"
                   step="any"
                   min="0.0001"
                   value={quantity}
@@ -148,10 +151,11 @@ export default function TransactionModal({ onClose, onSaved }: Props) {
                 />
               </label>
               <label className="block">
-                <span className="text-xs text-[#6B7E9C] mb-1.5 block">Price (USD)</span>
+                <span className="text-xs text-[#6B7E9C] mb-1.5 block">单价（美元）</span>
                 <input
                   required
                   type="number"
+                  inputMode="decimal"
                   step="any"
                   min="0"
                   value={price}
@@ -163,7 +167,7 @@ export default function TransactionModal({ onClose, onSaved }: Props) {
             </div>
 
             <label className="block">
-              <span className="text-xs text-[#6B7E9C] mb-1.5 block">Date</span>
+              <span className="text-xs text-[#6B7E9C] mb-1.5 block">交易日期</span>
               <input
                 required
                 type="date"
@@ -175,19 +179,19 @@ export default function TransactionModal({ onClose, onSaved }: Props) {
 
             {quantity && price && (
               <div className="text-xs text-[#6B7E9C] bg-[#141C2C] rounded-lg px-3 py-2">
-                Total: <span className="font-mono text-[#E8EDFB]">
+                合计：<span className="font-mono text-[#E8EDFB]">
                   ${(+quantity * +price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
             )}
 
             <label className="block">
-              <span className="text-xs text-[#6B7E9C] mb-1.5 block">Notes (optional)</span>
+              <span className="text-xs text-[#6B7E9C] mb-1.5 block">备注（可选）</span>
               <input
                 type="text"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="e.g. earnings play"
+                placeholder="如：财报前布局"
                 className="w-full px-3 py-2.5 rounded-lg bg-[#141C2C] border border-[#1E2D42] text-sm focus:outline-none focus:border-[#4F8EF7]"
               />
             </label>
@@ -197,11 +201,11 @@ export default function TransactionModal({ onClose, onSaved }: Props) {
               disabled={saving}
               className={`w-full py-3 rounded-xl text-sm font-semibold transition-all ${
                 type === 'buy'
-                  ? 'bg-emerald-500 hover:bg-emerald-400 text-white'
-                  : 'bg-rose-500 hover:bg-rose-400 text-white'
+                  ? 'bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-white'
+                  : 'bg-rose-500 hover:bg-rose-400 active:bg-rose-600 text-white'
               } disabled:opacity-50`}
             >
-              {saving ? 'Saving...' : `Record ${type === 'buy' ? 'Buy' : 'Sell'}`}
+              {saving ? '保存中…' : type === 'buy' ? '记录买入' : '记录卖出'}
             </button>
           </form>
         )}

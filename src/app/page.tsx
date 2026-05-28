@@ -4,6 +4,7 @@ import { Plus, RefreshCw, TrendingUp, TrendingDown, BarChart3, Search, ArrowUpDo
 import HoldingsTable from '@/components/HoldingsTable';
 import TransactionList from '@/components/TransactionList';
 import TransactionModal from '@/components/TransactionModal';
+import FontSizeToggle from '@/components/FontSizeToggle';
 
 interface Summary { totalValue: number; totalCost: number; totalPnl: number; totalPnlPct: number }
 interface Holding { ticker: string; name: string; shares: number; avgCost: number; currentPrice: number; currentValue: number; pnl: number; pnlPct: number; dayChange: number; dayChangePct: number; portfolioPct: number }
@@ -13,6 +14,8 @@ type SortKey = 'value' | 'alloc' | 'pnlPct' | 'pnl' | 'name';
 function fmt(n: number) {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+const TAB_LABELS = { holdings: '持仓', transactions: '交易记录' } as const;
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'value', label: '市值' },
@@ -101,6 +104,7 @@ export default function Dashboard() {
             <span className="font-semibold text-sm tracking-tight">Trade Tracker</span>
           </div>
           <div className="flex items-center gap-2">
+            <FontSizeToggle />
             <button onClick={load} className="p-2 rounded-lg hover:bg-[#172033] text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">
               <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
             </button>
@@ -109,7 +113,7 @@ export default function Dashboard() {
               className="flex items-center gap-1.5 px-3 py-1.5 bg-[#4F8EF7] hover:bg-[#6EA3FF] text-white text-sm font-medium rounded-lg transition-colors"
             >
               <Plus size={15} />
-              <span className="hidden sm:inline">Add Trade</span>
+              <span className="hidden sm:inline">记录交易</span>
             </button>
           </div>
         </div>
@@ -124,7 +128,7 @@ export default function Dashboard() {
             <div className="rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-5 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-end gap-4 sm:gap-8">
                 <div>
-                  <p className="text-xs text-[#6B7E9C] mb-1 uppercase tracking-wider">Portfolio Value</p>
+                  <p className="text-xs text-[#6B7E9C] mb-1 uppercase tracking-wider">总资产</p>
                   <p className="text-3xl sm:text-4xl font-bold font-mono tracking-tight">${fmt(s.totalValue)}</p>
                 </div>
                 <div className={`flex items-center gap-2 pb-1 ${pos ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -164,11 +168,11 @@ export default function Dashboard() {
         <div className="flex gap-1 mb-4 p-1 bg-[#0F1520] border border-[#1E2D42] rounded-xl w-fit">
           {(['holdings', 'transactions'] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-1.5 text-sm rounded-lg capitalize transition-all ${
+              className={`px-4 py-1.5 text-sm rounded-lg transition-all ${
                 tab === t ? 'bg-[#172033] text-[#E8EDFB] font-medium' : 'text-[#6B7E9C] hover:text-[#E8EDFB]'
               }`}
             >
-              {t}
+              {TAB_LABELS[t]}
               <span className="ml-1.5 text-xs text-[#3A4E6A]">
                 ({t === 'holdings' ? (portfolio?.holdings.length ?? 0) : transactions.length})
               </span>

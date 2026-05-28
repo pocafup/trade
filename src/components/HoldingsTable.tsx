@@ -34,25 +34,25 @@ export default function HoldingsTable({ holdings }: { holdings: Holding[] }) {
   if (!holdings.length) {
     return (
       <div className="text-center py-16 text-[#6B7E9C] text-sm">
-        No holdings yet. Add your first trade above.
+        暂无持仓，点击上方「记录交易」添加第一笔。
       </div>
     );
   }
 
   return (
     <>
-      {/* Desktop table */}
+      {/* 桌面表格 */}
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-xs text-[#6B7E9C] border-b border-[#1E2D42]">
-              <th className="text-left pb-3 pr-4 font-medium">Stock</th>
-              <th className="text-right pb-3 px-4 font-medium">Shares</th>
-              <th className="text-right pb-3 px-4 font-medium">Avg Cost</th>
-              <th className="text-right pb-3 px-4 font-medium">Price</th>
-              <th className="text-right pb-3 px-4 font-medium">Value</th>
-              <th className="text-right pb-3 px-4 font-medium">P&L</th>
-              <th className="text-right pb-3 pl-4 font-medium">Alloc</th>
+              <th className="text-left pb-3 pr-4 font-medium">股票</th>
+              <th className="text-right pb-3 px-4 font-medium">持股数</th>
+              <th className="text-right pb-3 px-4 font-medium">成本价</th>
+              <th className="text-right pb-3 px-4 font-medium">现价</th>
+              <th className="text-right pb-3 px-4 font-medium">市值</th>
+              <th className="text-right pb-3 px-4 font-medium">盈亏</th>
+              <th className="text-right pb-3 pl-4 font-medium">占比</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#1E2D42]/50">
@@ -96,10 +96,11 @@ export default function HoldingsTable({ holdings }: { holdings: Holding[] }) {
         </table>
       </div>
 
-      {/* Mobile cards */}
+      {/* 手机卡片 */}
       <div className="md:hidden space-y-2">
         {holdings.map((h) => (
-          <Link key={h.ticker} href={`/stock/${h.ticker}`} className="block p-4 rounded-xl bg-[#0F1520] border border-[#1E2D42] hover:border-[#2A3F60] transition-colors">
+          <Link key={h.ticker} href={`/stock/${h.ticker}`}
+            className="block p-4 rounded-xl bg-[#0F1520] border border-[#1E2D42] hover:border-[#2A3F60] active:border-[#4F8EF7] transition-colors">
             <div className="flex items-start justify-between mb-3">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-[#172033] flex items-center justify-center text-xs font-mono font-bold text-[#4F8EF7]">
@@ -107,25 +108,25 @@ export default function HoldingsTable({ holdings }: { holdings: Holding[] }) {
                 </div>
                 <div>
                   <div className="font-semibold font-mono text-sm">{h.ticker}</div>
-                  <div className="text-xs text-[#6B7E9C] max-w-[180px] truncate">{h.name}</div>
+                  <div className="text-xs text-[#6B7E9C] max-w-[160px] truncate">{h.name}</div>
                 </div>
               </div>
               <div className="text-right">
                 <div className="font-mono text-sm font-semibold">${fmt(h.currentValue)}</div>
-                <div className="text-xs text-[#6B7E9C]">{fmt(h.portfolioPct, 1)}% of portfolio</div>
+                <div className="text-xs text-[#6B7E9C]">{fmt(h.portfolioPct, 1)}% 占比</div>
               </div>
             </div>
             <div className="grid grid-cols-3 gap-2 pt-3 border-t border-[#1E2D42]/60 text-xs">
               <div>
-                <div className="text-[#6B7E9C] mb-0.5">Shares</div>
+                <div className="text-[#6B7E9C] mb-0.5">持股</div>
                 <div className="font-mono">{fmt(h.shares, 2)}</div>
               </div>
               <div>
-                <div className="text-[#6B7E9C] mb-0.5">Avg Cost</div>
+                <div className="text-[#6B7E9C] mb-0.5">成本</div>
                 <div className="font-mono">${fmt(h.avgCost)}</div>
               </div>
               <div>
-                <div className="text-[#6B7E9C] mb-0.5">P&L</div>
+                <div className="text-[#6B7E9C] mb-0.5">盈亏</div>
                 <div className={`font-mono font-medium ${h.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {h.pnl >= 0 ? '+' : ''}${fmt(h.pnl)}
                 </div>

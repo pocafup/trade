@@ -22,7 +22,7 @@ export default function TransactionList({ transactions, onDeleted }: { transacti
   const [deleting, setDeleting] = useState<number | null>(null);
 
   async function del(id: number) {
-    if (!confirm('Delete this transaction?')) return;
+    if (!confirm('确定删除这条交易记录？')) return;
     setDeleting(id);
     await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
     setDeleting(null);
@@ -30,7 +30,7 @@ export default function TransactionList({ transactions, onDeleted }: { transacti
   }
 
   if (!transactions.length) {
-    return <div className="text-center py-10 text-[#6B7E9C] text-sm">No transactions yet.</div>;
+    return <div className="text-center py-10 text-[#6B7E9C] text-sm">暂无交易记录</div>;
   }
 
   return (
@@ -46,12 +46,13 @@ export default function TransactionList({ transactions, onDeleted }: { transacti
             <div className="flex items-baseline gap-1.5">
               <span className="font-mono text-sm font-semibold">{t.ticker}</span>
               <span className="text-xs text-[#6B7E9C]">
-                {t.type === 'buy' ? 'Bought' : 'Sold'} {t.quantity % 1 === 0 ? t.quantity : t.quantity.toFixed(4)} shares @ ${fmt(t.price)}
+                {t.type === 'buy' ? '买入' : '卖出'}{' '}
+                {t.quantity % 1 === 0 ? t.quantity : t.quantity.toFixed(4)} 股 @ ${fmt(t.price)}
               </span>
             </div>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-xs text-[#3A4E6A]">
-                {format(new Date(t.date + 'T00:00:00'), 'MMM d, yyyy')}
+                {format(new Date(t.date + 'T00:00:00'), 'yyyy年M月d日')}
               </span>
               {t.notes && <span className="text-xs text-[#3A4E6A] italic truncate max-w-[120px]">· {t.notes}</span>}
             </div>
@@ -59,10 +60,11 @@ export default function TransactionList({ transactions, onDeleted }: { transacti
           <div className="text-right shrink-0">
             <div className="font-mono text-sm font-medium">${fmt(t.quantity * t.price)}</div>
           </div>
+          {/* 手机端始终显示（低透明度），桌面端悬停显示 */}
           <button
             onClick={() => del(t.id)}
             disabled={deleting === t.id}
-            className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-rose-500/15 text-rose-400 transition-all shrink-0"
+            className="opacity-30 group-hover:opacity-100 active:opacity-100 p-1.5 rounded-lg hover:bg-rose-500/15 text-rose-400 transition-all shrink-0"
           >
             <Trash2 size={13} />
           </button>

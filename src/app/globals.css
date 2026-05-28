@@ -18,10 +18,14 @@
 
 * { box-sizing: border-box; }
 
+/* Font size variants */
+html[data-fs="sm"] { font-size: 13px; }
+html[data-fs="lg"] { font-size: 19px; }
+
 html, body {
   background-color: var(--bg);
   color: var(--text);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
 }

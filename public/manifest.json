@@ -1,0 +1,10 @@
+{
+  "name": "持仓追踪",
+  "short_name": "持仓",
+  "description": "个人股票组合追踪",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080B14",
+  "theme_color": "#080B14",
+  "orientation": "portrait-primary"
+}
