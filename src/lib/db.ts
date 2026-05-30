@@ -35,6 +35,14 @@ export function getDb(): DatabaseSync {
       username TEXT NOT NULL,
       password_hash TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS cash_flows (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal')),
+      amount REAL NOT NULL CHECK(amount > 0),
+      date TEXT NOT NULL,
+      notes TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   return _db;

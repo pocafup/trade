@@ -8,13 +8,14 @@ import TransactionModal from '@/components/TransactionModal';
 import FontSizeToggle from '@/components/FontSizeToggle';
 import type { DailyInsight } from '@/lib/daily-focus';
 
-interface Summary { totalValue: number; totalCost: number; totalPnl: number; totalPnlPct: number; ytdPnl: number; ytdPnlPct: number }
+interface Summary { totalValue: number; totalCost: number; totalPnl: number; totalPnlPct: number; ytdPnl: number; ytdPnlPct: number; currentCash: number; ytdNetPnl: number; annualReturn: number | null }
 interface Holding { ticker: string; name: string; shares: number; avgCost: number; currentPrice: number; currentValue: number; pnl: number; pnlPct: number; dayChange: number; dayChangePct: number; portfolioPct: number }
 interface WatchItem { ticker: string; name: string; price: number; change: number; changePct: number }
 interface PnlRecord { ticker: string; name: string; status: 'open' | 'closed'; realizedPnl: number; unrealizedPnl: number; totalPnl: number; currentShares: number; currentPrice: number; avgCost: number; firstBuyDate: string; lastActivityDate: string; holdingDays: number }
+interface CashFlow { id: number; type: 'deposit' | 'withdrawal'; amount: number; date: string; notes: string }
 
 type SortKey = 'value' | 'alloc' | 'pnlPct' | 'pnl' | 'name';
-type Tab = 'holdings' | 'pnl' | 'transactions' | 'watchlist';
+type Tab = 'holdings' | 'pnl' | 'transactions' | 'capital' | 'watchlist';
 type ChartRange = '1mo' | '3mo' | '1y' | 'max';
 
 function fmt(n: number) {
@@ -50,6 +51,10 @@ export default function Dashboard() {
   const [tab, setTab] = useState<Tab>('holdings');
   const [insight, setInsight] = useState<DailyInsight | null>(null);
   const [changePwModal, setChangePwModal] = useState(false);
+
+  // Capital / cash flow state
+  const [cashFlows, setCashFlows] = useState<CashFlow[]>([]);
+  const [cfModal, setCfModal] = useState(false);
 
   // Watchlist state
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
@@ -91,11 +96,16 @@ export default function Dashboard() {
     setWatchlist(await res.json());
   }, []);
 
+  const loadCashFlows = useCallback(async () => {
+    fetch('/api/cash-flows').then(r => r.json()).then(setCashFlows).catch(() => {});
+  }, []);
+
   useEffect(() => {
     load(false);
     loadWatchlist();
+    loadCashFlows();
     fetch('/api/daily-focus').then(r => r.json()).then(setInsight).catch(() => {});
-  }, [load, loadWatchlist]);
+  }, [load, loadWatchlist, loadCashFlows]);
 
   // Silent auto-refresh every 30s — data updates in-place, no loading spinner
   useEffect(() => {
@@ -265,6 +275,27 @@ export default function Dashboard() {
                         ({s.ytdPnl >= 0 ? '+' : ''}{fmt(s.ytdPnlPct)}%)
                       </span>
                     </div>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className="text-xs text-[#3A4E6A]">今年净赚</span>
+                      <span className={`font-mono text-sm font-semibold ${s.ytdNetPnl >= 0 ? 'text-emerald-400/75' : 'text-rose-400/75'}`}>
+                        {s.ytdNetPnl >= 0 ? '+' : ''}${fmt(s.ytdNetPnl)}
+                      </span>
+                      {s.annualReturn !== null && (
+                        <>
+                          <span className="text-[#1E2D42]">·</span>
+                          <span className="text-xs text-[#6B7E9C]">年化</span>
+                          <span className={`font-mono text-sm font-bold ${s.annualReturn >= 0 ? 'text-[#4F8EF7]' : 'text-rose-400'}`}>
+                            {s.annualReturn >= 0 ? '+' : ''}{fmt(s.annualReturn)}%
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    {s.currentCash > 0 && (
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs text-[#3A4E6A]">账户余额</span>
+                        <span className="font-mono text-sm text-[#8B9CC0]">${fmt(s.currentCash)}</span>
+                      </div>
+                    )}
                   </div>
                   <button onClick={() => setChartOpen(o => !o)}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#141C2C] border border-[#1E2D42] text-xs text-[#6B7E9C] hover:text-[#E8EDFB] hover:border-[#4F8EF7]/40 transition-colors mt-1 shrink-0">
@@ -376,13 +407,13 @@ export default function Dashboard() {
 
         {/* Tab switcher */}
         <div className="flex gap-1 mb-4 p-1 bg-[#0F1520] border border-[#1E2D42] rounded-xl w-fit flex-wrap">
-          {(['holdings', 'pnl', 'transactions', 'watchlist'] as Tab[]).map(t => (
+          {(['holdings', 'pnl', 'transactions', 'capital', 'watchlist'] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-3 py-1.5 text-sm rounded-lg transition-all flex items-center gap-1.5 ${
                 tab === t ? 'bg-[#172033] text-[#E8EDFB] font-medium' : 'text-[#6B7E9C] hover:text-[#E8EDFB]'
               }`}>
               {t === 'watchlist' && <Star size={11} />}
-              {t === 'holdings' ? '持仓' : t === 'pnl' ? '盈亏记录' : t === 'transactions' ? '交易记录' : '自选股'}
+              {t === 'holdings' ? '持仓' : t === 'pnl' ? '盈亏记录' : t === 'transactions' ? '交易记录' : t === 'capital' ? '资金' : '自选股'}
               {t === 'holdings' && <span className="ml-0.5 text-xs text-[#3A4E6A]">({portfolio?.holdings.length ?? 0})</span>}
               {t === 'transactions' && <span className="ml-0.5 text-xs text-[#3A4E6A]">({transactions.length})</span>}
             </button>
@@ -444,6 +475,17 @@ export default function Dashboard() {
             onRemove={removeFromWatchlist}
             onNavigate={t => router.push(`/stock/${t}`)}
           />
+        ) : tab === 'capital' ? (
+          <CapitalTab
+            flows={cashFlows}
+            summary={portfolio?.summary ?? null}
+            onAdd={() => setCfModal(true)}
+            onDelete={async (id) => {
+              await fetch(`/api/cash-flows/${id}`, { method: 'DELETE' });
+              loadCashFlows();
+              load(true);
+            }}
+          />
         ) : tab === 'pnl' ? (
           <PnlTab data={pnlData} loading={pnlLoading} onNavigate={t => router.push(`/stock/${t}`)} />
         ) : (
@@ -470,6 +512,12 @@ export default function Dashboard() {
 
       {modal && <TransactionModal onClose={() => setModal(false)} onSaved={load} />}
       {changePwModal && <ChangePasswordModal onClose={() => setChangePwModal(false)} />}
+      {cfModal && (
+        <CashFlowModal
+          onClose={() => setCfModal(false)}
+          onSaved={async () => { loadCashFlows(); load(true); setCfModal(false); }}
+        />
+      )}
     </div>
   );
 }
@@ -828,6 +876,204 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
             </div>
           </form>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Capital tab ───────────────────────────────────────────────────────────────
+function CapitalTab({
+  flows, summary, onAdd, onDelete,
+}: {
+  flows: CashFlow[];
+  summary: Summary | null;
+  onAdd: () => void;
+  onDelete: (id: number) => void;
+}) {
+  const [deleting, setDeleting] = useState<number | null>(null);
+
+  async function del(id: number) {
+    if (!confirm('确定删除这条记录？')) return;
+    setDeleting(id);
+    await onDelete(id);
+    setDeleting(null);
+  }
+
+  const hasCashFlows = flows.length > 0;
+
+  return (
+    <div className="space-y-4">
+      {/* Stats */}
+      <div className="bg-[#0F1520] border border-[#1E2D42] rounded-2xl p-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <div>
+            <p className="text-xs text-[#6B7E9C] mb-1">账户余额</p>
+            {summary ? (
+              <>
+                <p className={`font-mono font-bold text-lg ${summary.currentCash >= 0 ? 'text-[#E8EDFB]' : 'text-[#3A4E6A]'}`}>
+                  {summary.currentCash >= 0 ? '$' : '-$'}{fmt(Math.abs(summary.currentCash))}
+                </p>
+                {summary.currentCash < 0 && (
+                  <p className="text-xs text-[#3A4E6A] mt-0.5">未配置转账记录</p>
+                )}
+              </>
+            ) : <div className="h-6 w-20 bg-[#172033] rounded animate-pulse" />}
+          </div>
+          <div>
+            <p className="text-xs text-[#6B7E9C] mb-1">今年净赚（假设清仓）</p>
+            {summary ? (
+              <p className={`font-mono font-bold text-lg ${summary.ytdNetPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {summary.ytdNetPnl >= 0 ? '+' : ''}${fmt(summary.ytdNetPnl)}
+              </p>
+            ) : <div className="h-6 w-20 bg-[#172033] rounded animate-pulse" />}
+          </div>
+          <div>
+            <p className="text-xs text-[#6B7E9C] mb-1">年化收益率</p>
+            {summary ? (
+              hasCashFlows && summary.annualReturn !== null ? (
+                <p className={`font-mono font-bold text-lg ${summary.annualReturn >= 0 ? 'text-[#4F8EF7]' : 'text-rose-400'}`}>
+                  {summary.annualReturn >= 0 ? '+' : ''}{fmt(summary.annualReturn)}%
+                </p>
+              ) : (
+                <p className="font-mono text-lg text-[#3A4E6A]">—</p>
+              )
+            ) : <div className="h-6 w-16 bg-[#172033] rounded animate-pulse" />}
+            {summary && !hasCashFlows && (
+              <p className="text-xs text-[#3A4E6A] mt-0.5">需先添加转账记录</p>
+            )}
+          </div>
+        </div>
+        {summary && hasCashFlows && summary.annualReturn !== null && (
+          <p className="text-[11px] text-[#3A4E6A] mt-3 leading-relaxed border-t border-[#1E2D42] pt-3">
+            年化 = 今年净赚 ÷ Σ每日累计投入 × 365，以今年1月1日为起点计算
+          </p>
+        )}
+      </div>
+
+      {/* Add button + list */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium text-[#6B7E9C] uppercase tracking-wider">转账记录</p>
+        <button onClick={onAdd}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#4F8EF7] hover:bg-[#6EA3FF] text-white text-xs font-medium rounded-lg transition-colors">
+          <Plus size={12} />
+          记录转账
+        </button>
+      </div>
+
+      {flows.length === 0 ? (
+        <div className="bg-[#0F1520] border border-[#1E2D42] rounded-2xl p-10 text-center">
+          <p className="text-sm text-[#6B7E9C]">暂无转账记录</p>
+          <p className="text-xs text-[#3A4E6A] mt-1">记录每次向券商账户转入或转出的金额</p>
+        </div>
+      ) : (
+        <div className="bg-[#0F1520] border border-[#1E2D42] rounded-2xl overflow-hidden">
+          {flows.map((cf, i) => {
+            const isDeposit = cf.type === 'deposit';
+            return (
+              <div key={cf.id}
+                className={`flex items-center gap-3 px-4 py-3.5 ${i > 0 ? 'border-t border-[#1E2D42]' : ''}`}>
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-sm font-bold ${
+                  isDeposit ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'
+                }`}>
+                  {isDeposit ? '↑' : '↓'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2">
+                    <span className={`text-sm font-semibold ${isDeposit ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {isDeposit ? '转入' : '转出'}
+                    </span>
+                    <span className="font-mono text-sm font-bold">${fmt(cf.amount)}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs text-[#3A4E6A]">{cf.date}</span>
+                    {cf.notes && <span className="text-xs text-[#3A4E6A] italic truncate max-w-[140px]">· {cf.notes}</span>}
+                  </div>
+                </div>
+                <button onClick={() => del(cf.id)} disabled={deleting === cf.id}
+                  className="opacity-30 hover:opacity-100 p-1.5 rounded-lg hover:bg-rose-500/15 text-rose-400 transition-all shrink-0">
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Cash flow modal ───────────────────────────────────────────────────────────
+function CashFlowModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [type, setType] = useState<'deposit' | 'withdrawal'>('deposit');
+  const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!amount || Number(amount) <= 0) { setError('请输入有效金额'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch('/api/cash-flows', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, amount: Number(amount), date, notes }),
+      });
+      if (!res.ok) { setError('保存失败'); return; }
+      onSaved();
+    } catch { setError('网络错误'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-sm bg-[#0F1520] border border-[#1E2D42] rounded-2xl p-6">
+        <p className="text-xs font-medium text-[#6B7E9C] uppercase tracking-wider mb-5">记录转账</p>
+        <form onSubmit={submit} className="space-y-3">
+          <div className="flex gap-2">
+            {(['deposit', 'withdrawal'] as const).map(t => (
+              <button key={t} type="button" onClick={() => setType(t)}
+                className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
+                  type === t
+                    ? t === 'deposit' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                    : 'bg-[#141C2C] border border-[#1E2D42] text-[#6B7E9C] hover:text-[#E8EDFB]'
+                }`}>
+                {t === 'deposit' ? '↑ 转入' : '↓ 转出'}
+              </button>
+            ))}
+          </div>
+          <div>
+            <label className="block text-xs text-[#6B7E9C] mb-1.5">金额 (USD)</label>
+            <input type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required
+              placeholder="0.00"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-[#141C2C] border border-[#1E2D42] text-sm focus:outline-none focus:border-[#4F8EF7] placeholder:text-[#3A4E6A]" />
+          </div>
+          <div>
+            <label className="block text-xs text-[#6B7E9C] mb-1.5">日期</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} required
+              className="w-full px-3.5 py-2.5 rounded-xl bg-[#141C2C] border border-[#1E2D42] text-sm focus:outline-none focus:border-[#4F8EF7]" />
+          </div>
+          <div>
+            <label className="block text-xs text-[#6B7E9C] mb-1.5">备注（可选）</label>
+            <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl bg-[#141C2C] border border-[#1E2D42] text-sm focus:outline-none focus:border-[#4F8EF7]" />
+          </div>
+          {error && <p className="text-xs text-rose-400 bg-rose-400/10 border border-rose-400/20 rounded-xl px-3 py-2">{error}</p>}
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl border border-[#1E2D42] text-sm text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">
+              取消
+            </button>
+            <button type="submit" disabled={saving}
+              className="flex-1 py-2.5 rounded-xl bg-[#4F8EF7] hover:bg-[#6EA3FF] disabled:opacity-50 text-white font-medium text-sm transition-colors">
+              {saving ? '保存中…' : '保存'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

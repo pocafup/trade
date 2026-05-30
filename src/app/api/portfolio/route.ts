@@ -94,6 +94,61 @@ export async function GET() {
 
   holdings.sort((a, b) => b.currentValue - a.currentValue);
 
+  // ── Cash flow computations ───────────────────────────────────────────────────
+  const cashFlows = db.prepare(
+    'SELECT type, amount, date FROM cash_flows ORDER BY date ASC',
+  ).all() as { type: string; amount: number; date: string }[];
+
+  // Net cash spent on stocks across all time (buys - sells, by proceeds)
+  const netStockSpend = txns.reduce(
+    (s, t) => s + (t.type === 'buy' ? t.quantity * t.price : -t.quantity * t.price),
+    0,
+  );
+
+  // Remaining cash = deposits - withdrawals - money currently in stocks
+  const totalDeposited  = cashFlows.filter(cf => cf.type === 'deposit').reduce((s, cf) => s + cf.amount, 0);
+  const totalWithdrawn  = cashFlows.filter(cf => cf.type === 'withdrawal').reduce((s, cf) => s + cf.amount, 0);
+  const currentCash     = cashFlows.length > 0
+    ? totalDeposited - totalWithdrawn - netStockSpend
+    : -netStockSpend; // default: negative = "not configured yet"
+
+  // If sold everything today, total net P&L this year
+  const ytdNetPnl = ytdPnl + (totalValue - totalCost);
+
+  // Annual return: ytdNetPnl / Σ(daily cumulative balance) * 365
+  // Daily balance = cumulative net deposits (cash flow-based, per the Modified Dietz approach)
+  let annualReturn: number | null = null;
+  if (cashFlows.length > 0) {
+    // Balance carried into Jan 1 from prior-year flows
+    let balAtYearStart = 0;
+    for (const cf of cashFlows) {
+      if (cf.date >= yearStart) break;
+      balAtYearStart += cf.type === 'deposit' ? cf.amount : -cf.amount;
+    }
+
+    // Build day-of-year delta map
+    const dailyDelta = new Map<string, number>();
+    for (const cf of cashFlows) {
+      if (cf.date < yearStart) continue;
+      const d = cf.type === 'deposit' ? cf.amount : -cf.amount;
+      dailyDelta.set(cf.date, (dailyDelta.get(cf.date) ?? 0) + d);
+    }
+
+    // Sum cumulative balance over every day Jan 1 → today
+    const todayDate = new Date(); todayDate.setHours(0, 0, 0, 0);
+    const startDate = new Date(yearStart + 'T00:00:00');
+    let cum = balAtYearStart, dailySum = 0;
+    const cur = new Date(startDate);
+    while (cur <= todayDate) {
+      const ds = cur.toISOString().split('T')[0];
+      cum += dailyDelta.get(ds) ?? 0;
+      dailySum += cum;
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    if (dailySum > 0) annualReturn = (ytdNetPnl / dailySum) * 365 * 100;
+  }
+
   return NextResponse.json({
     holdings,
     summary: {
@@ -103,6 +158,9 @@ export async function GET() {
       totalPnlPct: totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0,
       ytdPnl,
       ytdPnlPct: totalCost > 0 ? (ytdPnl / totalCost) * 100 : 0,
+      currentCash,
+      ytdNetPnl,
+      annualReturn,
     },
   });
 }
