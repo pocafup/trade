@@ -1,5 +1,5 @@
 """
-用 AAPL 运行双均线回测，与 AAPL/SPY 买入持有对比绩效。
+AAPL 回测绩效对比：原始双均线 vs 趋势过滤双均线 vs SPY 买入持有。
 运行：cd quant/ && python scripts/verify_backtest.py
 """
 import sys
@@ -17,42 +17,65 @@ INITIAL    = 10_000.0
 COMMISSION = 0.001   # 0.1% 单边
 
 
-# ── 工具 ───────────────────────────────────────────────────────────────────────
-
 def _bnh_signals(ohlcv: pd.DataFrame) -> pd.Series:
-    """第 0 天收盘发出买入信号，之后永久持有。"""
     s = pd.Series(0, index=ohlcv.index, dtype=int)
     s.iloc[0] = 1
     return s
 
 
 def _fmt(val: float, fmt: str) -> str:
-    return "N/A" if (val is None or (isinstance(val, float) and np.isnan(val))) else format(val, fmt)
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return "N/A"
+    return format(val, fmt)
 
 
 def _print_table(rows: list[tuple[str, BacktestResult]]) -> None:
-    col = ["策略", "累计收益", "年化收益", "年化波动", "夏普", "最大回撤", "交易数", "胜率"]
-    w   = [22,      9,          9,          8,          6,      9,          6,         7]
-    header = "  ".join(f"{c:>{w[i]}s}" for i, c in enumerate(col))
+    cols = ["策略", "累计收益", "年化收益", "夏普", "最大回撤", "交易数", "胜率"]
+    widths = [24, 9, 9, 6, 9, 6, 8]
+
+    header = "  ".join(f"{c:>{w}s}" for c, w in zip(cols, widths))
     sep    = "─" * len(header)
     print(header)
     print(sep)
+
     for name, r in rows:
         wr = _fmt(r.win_rate, ".1%")
         if r.has_open_position:
             wr += "*"
-        print("  ".join([
-            f"{name:>{w[0]}s}",
-            f"{_fmt(r.total_return,     '+.2%'):>{w[1]}s}",
-            f"{_fmt(r.annualized_return,'+.2%'):>{w[2]}s}",
-            f"{_fmt(r.annualized_vol,   '.2%'):>{w[3]}s}",
-            f"{_fmt(r.sharpe,           '.2f'):>{w[4]}s}",
-            f"{_fmt(r.max_dd,           '+.2%'):>{w[5]}s}",
-            f"{r.n_trades:>{w[6]}d}",
-            f"{wr:>{w[7]}s}",
-        ]))
+        cells = [
+            f"{name:>{widths[0]}s}",
+            f"{_fmt(r.total_return,      '+.2%'):>{widths[1]}s}",
+            f"{_fmt(r.annualized_return, '+.2%'):>{widths[2]}s}",
+            f"{_fmt(r.sharpe,            '.2f'):>{widths[3]}s}",
+            f"{_fmt(r.max_dd,            '+.2%'):>{widths[4]}s}",
+            f"{r.n_trades:>{widths[5]}d}",
+            f"{wr:>{widths[6]}s}",
+        ]
+        print("  ".join(cells))
+
     print(sep)
-    print("  * 回测结束时仍持仓，胜率仅统计已完成交易")
+    print("  * 回测结束时仍持仓，胜率仅计已完成往返")
+
+
+def _print_trades(result: BacktestResult, name: str) -> None:
+    print(f"\n{name} — 已完成交易：")
+    if not result.trades:
+        print("  （无已完成往返）")
+        return
+    print(f"  {'买入日':12s}  {'买入价':>8s}  {'卖出日':12s}  {'卖出价':>8s}  {'净收益':>9s}")
+    print("  " + "─" * 58)
+    for t in result.trades:
+        mark = "✓" if t.pnl_pct > 0 else "✗"
+        print(
+            f"  {t.entry_date.date()!s:12s}  {t.entry_price:>8.2f}"
+            f"  {t.exit_date.date()!s:12s}  {t.exit_price:>8.2f}"
+            f"  {t.pnl_pct:>+9.2%}  {mark}"
+        )
+    if result.has_open_position:
+        print(
+            f"  {'（持仓中）':12s}  {result.open_entry_price:>8.2f}"
+            f"  {'─':>12s}  {'─':>8s}  （未平仓）"
+        )
 
 
 def main() -> None:
@@ -62,56 +85,41 @@ def main() -> None:
     spy  = data["SPY"]
 
     # ── 三种策略 ─────────────────────────────────────────────────────────────
-    aapl_sigs   = ma_cross_signal(aapl["Close"], fast=20, slow=50)
-    aapl_ma     = run(aapl, aapl_sigs,    INITIAL, COMMISSION)
-    aapl_bnh    = run(aapl, _bnh_signals(aapl), INITIAL, COMMISSION)
-    spy_bnh     = run(spy,  _bnh_signals(spy),  INITIAL, COMMISSION)
+    sigs_raw      = ma_cross_signal(aapl["Close"], fast=20, slow=50)
+    sigs_filtered = ma_cross_signal(aapl["Close"], fast=20, slow=50, trend=200)
+
+    r_raw      = run(aapl, sigs_raw,            INITIAL, COMMISSION)
+    r_filtered = run(aapl, sigs_filtered,        INITIAL, COMMISSION)
+    r_spy      = run(spy,  _bnh_signals(spy),    INITIAL, COMMISSION)
 
     # ── 报告头 ───────────────────────────────────────────────────────────────
-    start = aapl.index[0].date()
-    end   = aapl.index[-1].date()
-    n     = len(aapl)
+    start, end, n = aapl.index[0].date(), aapl.index[-1].date(), len(aapl)
     print(f"回测区间：{start}  →  {end}  （{n} 个交易日）")
     print(f"初始资金：${INITIAL:>,.0f}   手续费：{COMMISSION:.1%} 单边\n")
 
+    # ── 信号变化对比 ─────────────────────────────────────────────────────────
+    n_buy_raw      = (sigs_raw      == 1).sum()
+    n_buy_filtered = (sigs_filtered == 1).sum()
+    print(f"信号统计：原始买入信号 {n_buy_raw} 次  →  趋势过滤后 {n_buy_filtered} 次"
+          f"  （屏蔽了 {n_buy_raw - n_buy_filtered} 次价格低于 MA200 的金叉）\n")
+
     # ── 绩效表格 ─────────────────────────────────────────────────────────────
     _print_table([
-        ("AAPL MA20/50 交叉", aapl_ma),
-        ("AAPL 买入持有",     aapl_bnh),
-        ("SPY  买入持有",     spy_bnh),
+        ("AAPL  MA20/50（原始）",       r_raw),
+        ("AAPL  MA20/50 + MA200 过滤",  r_filtered),
+        ("SPY   买入持有",              r_spy),
     ])
 
     # ── 详细交易记录 ──────────────────────────────────────────────────────────
-    print(f"\nAAP MA 交叉策略 — 全部 {aapl_ma.n_trades} 笔已完成交易：")
-    if aapl_ma.trades:
-        print(f"  {'买入日':12s}  {'买入价':>8s}  {'卖出日':12s}  {'卖出价':>8s}  {'净收益':>9s}")
-        print("  " + "─" * 58)
-        for t in aapl_ma.trades:
-            marker = "✓" if t.pnl_pct > 0 else "✗"
-            print(
-                f"  {t.entry_date.date()!s:12s}  {t.entry_price:>8.2f}"
-                f"  {t.exit_date.date()!s:12s}  {t.exit_price:>8.2f}"
-                f"  {t.pnl_pct:>+9.2%}  {marker}"
-            )
-    else:
-        print("  （回测期间未完成任何往返交易）")
+    _print_trades(r_raw,      "原始双均线")
+    _print_trades(r_filtered, "趋势过滤双均线")
 
-    # ── 未平仓情况 ───────────────────────────────────────────────────────────
-    if aapl_ma.has_open_position:
-        last_close   = aapl["Close"].iloc[-1]
-        unrealized   = last_close / aapl_ma.open_entry_price - 1
-        print(
-            f"\n未平仓：买入于 {aapl_ma.open_entry_date.date()}  "
-            f"@ ${aapl_ma.open_entry_price:.2f}，"
-            f"当前未实现收益 {unrealized:+.2%}"
-        )
-
-    # ── 权益曲线对比（最近 10 天） ───────────────────────────────────────────
-    print("\n权益曲线末尾对比（最近 10 天，初始资金 $10,000）：")
+    # ── 权益曲线末尾 ─────────────────────────────────────────────────────────
+    print("\n权益曲线末尾（最近 10 天，初始资金 $10,000）：")
     cmp = pd.DataFrame({
-        "AAPL_MA": aapl_ma.equity,
-        "AAPL_BnH": aapl_bnh.equity,
-        "SPY_BnH":  spy_bnh.equity,
+        "原始MA":  r_raw.equity,
+        "过滤MA":  r_filtered.equity,
+        "SPY_BnH": r_spy.equity,
     })
     print(cmp.tail(10).to_string(float_format="${:>,.2f}".format))
 

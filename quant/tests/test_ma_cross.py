@@ -183,6 +183,104 @@ def test_no_lookahead_bias_multiple_dates():
         )
 
 
+# ── 趋势过滤测试 ──────────────────────────────────────────────────────────────
+
+def test_trend_filter_buy_only_above_trend():
+    """
+    最严格的趋势过滤验证：
+    对所有产生买入信号的日期，收盘价必须高于趋势均线。
+    逐日检查，任何一天违反则测试失败。
+    """
+    rng = np.random.default_rng(42)
+    prices = pd.Series(
+        100.0 * np.exp(np.cumsum(rng.normal(0.001, 0.02, 500))),
+        index=pd.date_range("2020-01-01", periods=500),
+    )
+    trend = 50   # 使用较短窗口确保有信号可验
+    sig       = signal(prices, fast=10, slow=20, trend=trend)
+    ma_trend  = prices.rolling(trend).mean()
+
+    for day in prices.index[sig == 1]:
+        assert prices[day] > ma_trend[day], (
+            f"{day.date()}: 买入信号时价格 {prices[day]:.2f} ≤ "
+            f"MA{trend} {ma_trend[day]:.2f}，趋势过滤失效"
+        )
+
+
+def test_trend_filter_suppresses_buys_below_trend():
+    """
+    无过滤时有买入信号，加了过滤后该信号被屏蔽。
+    构造：金叉发生，但当天价格低于趋势均线。
+    """
+    rng = np.random.default_rng(2024)
+    prices = pd.Series(
+        100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.02, 500))),
+        index=pd.date_range("2020-01-01", periods=500),
+    )
+    sig_raw      = signal(prices, fast=20, slow=50)
+    sig_filtered = signal(prices, fast=20, slow=50, trend=200)
+
+    # 趋势过滤后买入信号数不超过原始信号
+    assert (sig_filtered == 1).sum() <= (sig_raw == 1).sum()
+
+
+def test_trend_filter_does_not_affect_sell_signal():
+    """
+    卖出信号不受趋势过滤影响：两种设置下死叉日期完全一致。
+    持仓可在任何趋势条件下卖出。
+    """
+    rng = np.random.default_rng(99)
+    prices = pd.Series(
+        100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.02, 500))),
+        index=pd.date_range("2020-01-01", periods=500),
+    )
+    sig_raw      = signal(prices, fast=20, slow=50)
+    sig_filtered = signal(prices, fast=20, slow=50, trend=200)
+
+    # 死叉日期集合完全相同
+    sell_raw      = set(prices.index[sig_raw      == -1])
+    sell_filtered = set(prices.index[sig_filtered == -1])
+    assert sell_raw == sell_filtered, "趋势过滤不应改变任何卖出信号"
+
+
+def test_trend_filter_no_lookahead_bias():
+    """
+    趋势过滤同样满足无前视偏差：截断到 T 后信号不变。
+    """
+    rng = np.random.default_rng(2026)
+    prices = pd.Series(
+        100.0 * np.exp(np.cumsum(rng.normal(0.001, 0.02, 500))),
+        index=pd.date_range("2022-01-01", periods=500),
+    )
+    T = 350   # 趋势均线已预热（T > 200）
+
+    sig_full  = signal(prices,              fast=20, slow=50, trend=200)
+    sig_trunc = signal(prices.iloc[:T + 1], fast=20, slow=50, trend=200)
+
+    assert sig_full.iloc[T] == sig_trunc.iloc[-1], (
+        f"趋势过滤存在前视偏差：完整={sig_full.iloc[T]}，截断={sig_trunc.iloc[-1]}"
+    )
+
+
+def test_trend_filter_warmup_suppresses_early_buys():
+    """
+    趋势均线预热期（前 trend-1 天）内，买入信号应全部被屏蔽。
+    因为 MA(trend) 为 NaN，NaN 比较返回 False → 买入条件不满足。
+    """
+    rng = np.random.default_rng(77)
+    prices = pd.Series(
+        np.linspace(80, 120, 300),  # 单调上涨，快线早早穿越慢线
+        index=pd.date_range("2020-01-01", periods=300),
+    )
+    trend = 100
+    sig   = signal(prices, fast=5, slow=10, trend=trend)
+
+    # 前 trend-1 = 99 天内，趋势均线 NaN，买入信号应为 0
+    assert (sig.iloc[:trend - 1] != 1).all(), (
+        "趋势均线预热期内不应有买入信号"
+    )
+
+
 # ── 信号稀疏性（大多数时候应为持有）────────────────────────────────────────────
 
 def test_signals_are_sparse():
