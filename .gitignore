@@ -6,3 +6,7 @@ data/
 .env.local
 *.db
 .playwright-mcp/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
