@@ -1,7 +1,8 @@
 !public/.gitkeep
 node_modules/
 .next/
-data/
+/data/
+quant/data/cache/
 .env
 .env.local
 *.db
