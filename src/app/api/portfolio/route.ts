@@ -27,6 +27,24 @@ export async function GET() {
   const quotes = await Promise.all(tickers.map((t) => getQuote(t)));
   const quoteMap = new Map(tickers.map((t, i) => [t, quotes[i]]));
 
+  // YTD realized P&L: gains from sell transactions since Jan 1 of current year
+  const yearStart = `${new Date().getFullYear()}-01-01`;
+  let ytdPnl = 0;
+  for (const [, { txns }] of byTicker) {
+    let avgCost = 0, shares = 0;
+    for (const txn of txns) {
+      if (txn.type === 'buy') {
+        const totalCostBasis = shares * avgCost + txn.quantity * txn.price;
+        shares += txn.quantity;
+        avgCost = totalCostBasis / shares;
+      } else {
+        if (txn.date >= yearStart) ytdPnl += txn.quantity * (txn.price - avgCost);
+        shares -= txn.quantity;
+        if (shares < 0.0001) { shares = 0; avgCost = 0; }
+      }
+    }
+  }
+
   const holdings = [];
   let totalValue = 0;
   let totalCost = 0;
@@ -83,6 +101,8 @@ export async function GET() {
       totalCost,
       totalPnl: totalValue - totalCost,
       totalPnlPct: totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0,
+      ytdPnl,
+      ytdPnlPct: totalCost > 0 ? (ytdPnl / totalCost) * 100 : 0,
     },
   });
 }

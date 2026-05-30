@@ -8,7 +8,7 @@ import TransactionModal from '@/components/TransactionModal';
 import FontSizeToggle from '@/components/FontSizeToggle';
 import type { DailyInsight } from '@/lib/daily-focus';
 
-interface Summary { totalValue: number; totalCost: number; totalPnl: number; totalPnlPct: number }
+interface Summary { totalValue: number; totalCost: number; totalPnl: number; totalPnlPct: number; ytdPnl: number; ytdPnlPct: number }
 interface Holding { ticker: string; name: string; shares: number; avgCost: number; currentPrice: number; currentValue: number; pnl: number; pnlPct: number; dayChange: number; dayChangePct: number; portfolioPct: number }
 interface WatchItem { ticker: string; name: string; price: number; change: number; changePct: number }
 interface PnlRecord { ticker: string; name: string; status: 'open' | 'closed'; realizedPnl: number; unrealizedPnl: number; totalPnl: number; currentShares: number; currentPrice: number; avgCost: number; firstBuyDate: string; lastActivityDate: string; holdingDays: number }
@@ -255,6 +255,15 @@ export default function Dashboard() {
                       {pos ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
                       <span className="font-mono text-base font-semibold">{pos ? '+' : ''}${fmt(s.totalPnl)}</span>
                       <span className="font-mono text-sm opacity-80">({pos ? '+' : ''}{fmt(s.totalPnlPct)}%)</span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs text-[#3A4E6A]">YTD</span>
+                      <span className={`font-mono text-sm font-semibold ${s.ytdPnl >= 0 ? 'text-emerald-400/75' : 'text-rose-400/75'}`}>
+                        {s.ytdPnl >= 0 ? '+' : ''}${fmt(s.ytdPnl)}
+                      </span>
+                      <span className={`font-mono text-xs opacity-70 ${s.ytdPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        ({s.ytdPnl >= 0 ? '+' : ''}{fmt(s.ytdPnlPct)}%)
+                      </span>
                     </div>
                   </div>
                   <button onClick={() => setChartOpen(o => !o)}
@@ -511,9 +520,13 @@ function PortfolioChart({ points, height, hoverIdx, onHover }: {
 }
 
 // ── PnL tab ───────────────────────────────────────────────────────────────────
+type PnlSort = 'open-first' | 'by-pnl';
+
 function PnlTab({ data, loading, onNavigate }: {
   data: PnlRecord[] | null; loading: boolean; onNavigate: (t: string) => void;
 }) {
+  const [sort, setSort] = useState<PnlSort>('open-first');
+
   if (loading || !data) {
     return (
       <div className="bg-[#0F1520] border border-[#1E2D42] rounded-2xl divide-y divide-[#1E2D42] overflow-hidden">
@@ -528,6 +541,13 @@ function PnlTab({ data, loading, onNavigate }: {
       </div>
     );
   }
+
+  const sorted = sort === 'by-pnl'
+    ? [...data].sort((a, b) => b.totalPnl - a.totalPnl)
+    : [
+        ...data.filter(r => r.status === 'open').sort((a, b) => b.totalPnl - a.totalPnl),
+        ...data.filter(r => r.status === 'closed').sort((a, b) => b.totalPnl - a.totalPnl),
+      ];
 
   const totalRealized   = data.reduce((s, r) => s + r.realizedPnl, 0);
   const totalUnrealized = data.reduce((s, r) => s + r.unrealizedPnl, 0);
@@ -557,9 +577,24 @@ function PnlTab({ data, loading, onNavigate }: {
         </div>
       </div>
 
+      {/* Sort toggle */}
+      <div className="flex gap-1 items-center">
+        <span className="text-xs text-[#6B7E9C] mr-0.5">排序:</span>
+        {([['open-first', '持仓优先'], ['by-pnl', '按盈利']] as [PnlSort, string][]).map(([key, label]) => (
+          <button key={key} onClick={() => setSort(key)}
+            className={`px-2.5 py-1 rounded-lg text-xs transition-all ${
+              sort === key
+                ? 'bg-[#4F8EF7]/20 text-[#4F8EF7] border border-[#4F8EF7]/40'
+                : 'text-[#6B7E9C] hover:text-[#E8EDFB] hover:bg-[#172033]'
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Per-ticker list */}
       <div className="bg-[#0F1520] border border-[#1E2D42] rounded-2xl overflow-hidden">
-        {data.map((r, i) => {
+        {sorted.map((r, i) => {
           const isPos = r.totalPnl >= 0;
           return (
             <button key={r.ticker} onClick={() => onNavigate(r.ticker)}
