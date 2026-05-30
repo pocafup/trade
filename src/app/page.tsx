@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, RefreshCw, TrendingUp, TrendingDown, BarChart3, Search, ArrowUpDown, X, AlertTriangle, Zap, Star, Trash2, LogOut, KeyRound, Eye, EyeOff, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, RefreshCw, TrendingUp, TrendingDown, BarChart3, Search, ArrowUpDown, X, AlertTriangle, Zap, Star, Trash2, LogOut, KeyRound, Eye, EyeOff, ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react';
 import HoldingsTable from '@/components/HoldingsTable';
 import TransactionList from '@/components/TransactionList';
 import TransactionModal from '@/components/TransactionModal';
@@ -13,6 +13,11 @@ interface Holding { ticker: string; name: string; shares: number; avgCost: numbe
 interface WatchItem { ticker: string; name: string; price: number; change: number; changePct: number }
 interface PnlRecord { ticker: string; name: string; status: 'open' | 'closed'; realizedPnl: number; unrealizedPnl: number; totalPnl: number; currentShares: number; currentPrice: number; avgCost: number; firstBuyDate: string; lastActivityDate: string; holdingDays: number }
 interface CashFlow { id: number; type: 'deposit' | 'withdrawal'; amount: number; date: string; notes: string }
+interface RiskSnippet {
+  source: 'db' | 'json';
+  portfolio: { portfolio_vol: number; beta: number | null; sharpe: number | null; max_dd: number };
+  assets: { symbol: string; risk_contribution: number; risk_tier: string }[];
+}
 
 type SortKey = 'value' | 'alloc' | 'pnlPct' | 'pnl' | 'name';
 type Tab = 'holdings' | 'pnl' | 'transactions' | 'capital' | 'watchlist';
@@ -79,6 +84,10 @@ export default function Dashboard() {
   const [pnlData, setPnlData]       = useState<PnlRecord[] | null>(null);
   const [pnlLoading, setPnlLoading] = useState(false);
 
+  // Risk snippet state
+  const [riskData, setRiskData]       = useState<RiskSnippet | null>(null);
+  const [riskLoading, setRiskLoading] = useState(true);
+
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -105,6 +114,9 @@ export default function Dashboard() {
     loadWatchlist();
     loadCashFlows();
     fetch('/api/daily-focus').then(r => r.json()).then(setInsight).catch(() => {});
+    fetch('/api/risk').then(r => r.json()).then(d => {
+      if (d?.portfolio && Array.isArray(d?.assets)) setRiskData(d);
+    }).catch(() => {}).finally(() => setRiskLoading(false));
   }, [load, loadWatchlist, loadCashFlows]);
 
   // Silent auto-refresh every 30s — data updates in-place, no loading spinner
@@ -199,6 +211,10 @@ export default function Dashboard() {
             <FontSizeToggle />
             <button onClick={() => load(false)} className="p-2 rounded-lg hover:bg-[#172033] text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">
               <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+            </button>
+            <button onClick={() => router.push('/risk')} title="风险分析"
+              className="p-2 rounded-lg hover:bg-[#172033] text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">
+              <ShieldAlert size={15} />
             </button>
             <button onClick={() => setChangePwModal(true)} title="修改账户"
               className="p-2 rounded-lg hover:bg-[#172033] text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">
@@ -402,6 +418,64 @@ export default function Dashboard() {
                 );
               })}
             </div>
+          )}
+        </section>
+
+        {/* Risk snippet card */}
+        <section className="mb-5">
+          {riskLoading ? (
+            <div className="h-[72px] rounded-2xl bg-[#0F1520] animate-pulse" />
+          ) : (
+            <button onClick={() => router.push('/risk')}
+              className="w-full text-left rounded-2xl bg-[#0F1520] border border-[#1E2D42] p-4 hover:border-[#4F8EF7]/40 transition-colors group">
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert size={13} className="text-[#4F8EF7]" />
+                  <p className="text-xs font-medium text-[#6B7E9C] uppercase tracking-wider">组合风险</p>
+                  {riskData && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#141C2C] text-[#3A4E6A]">
+                      {riskData.source === 'db' ? '账本' : 'JSON'}
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs text-[#4F8EF7] opacity-70 group-hover:opacity-100 transition-opacity">完整分析 →</span>
+              </div>
+              {!riskData ? (
+                <p className="text-xs text-[#3A4E6A]">风险服务未启动 — 运行 <span className="font-mono">python -m uvicorn main:app</span></p>
+              ) : (
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <p className="text-[10px] text-[#6B7E9C] mb-0.5">年化波动</p>
+                    <p className={`font-mono text-base font-bold leading-none ${
+                      riskData.portfolio.portfolio_vol > 0.35 ? 'text-rose-400'
+                      : riskData.portfolio.portfolio_vol > 0.25 ? 'text-amber-400'
+                      : 'text-emerald-400'}`}>
+                      {(riskData.portfolio.portfolio_vol * 100).toFixed(1)}%
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-[#6B7E9C] mb-0.5">Beta</p>
+                    <p className={`font-mono text-base font-bold leading-none ${
+                      (riskData.portfolio.beta ?? 0) > 1.3 ? 'text-rose-400'
+                      : (riskData.portfolio.beta ?? 0) > 1.0 ? 'text-amber-400'
+                      : 'text-emerald-400'}`}>
+                      {riskData.portfolio.beta != null ? riskData.portfolio.beta.toFixed(2) : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-[#6B7E9C] mb-0.5">最高风险持仓</p>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="font-mono text-sm font-bold text-rose-400 leading-none">
+                        {riskData.assets[0]?.symbol ?? '—'}
+                      </span>
+                      <span className="text-xs text-[#6B7E9C]">
+                        {((riskData.assets[0]?.risk_contribution ?? 0) * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </button>
           )}
         </section>
 

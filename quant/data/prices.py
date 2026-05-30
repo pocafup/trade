@@ -63,6 +63,14 @@ def _open_db(path: Path) -> sqlite3.Connection:
     return con
 
 
+def _min_cached_date(con: sqlite3.Connection, symbol: str) -> date | None:
+    """Earliest date in cache for this symbol, or None if not cached at all."""
+    row = con.execute(
+        "SELECT MIN(date) FROM ohlcv WHERE symbol = ?", (symbol,)
+    ).fetchone()
+    return date.fromisoformat(row[0]) if row[0] else None
+
+
 def _max_cached_date(con: sqlite3.Connection, symbol: str) -> date | None:
     """Latest date in cache for this symbol, or None if not cached at all."""
     row = con.execute(
@@ -166,20 +174,22 @@ def fetch(
     try:
         for symbol in symbols:
             max_cached = _max_cached_date(con, symbol)
+            min_cached = _min_cached_date(con, symbol)
 
             if max_cached is None:
                 # No cache at all — fetch the full window
-                fetch_from = start
-            elif max_cached < today - timedelta(days=1):
-                # Cache is at least one trading day stale — fetch the tail
-                fetch_from = max_cached + timedelta(days=1)
-            else:
-                # Cache is current (today or yesterday for weekends/holidays)
-                fetch_from = None
-
-            if fetch_from is not None:
-                df_new = _download(symbol, fetch_from, today)
+                df_new = _download(symbol, start, today)
                 _write_df(con, symbol, df_new)
+            else:
+                # 头部回填：缓存起点晚于请求起点时，补下载缺失的历史数据
+                if min_cached is not None and min_cached > start:
+                    df_hist = _download(symbol, start, min_cached - timedelta(days=1))
+                    _write_df(con, symbol, df_hist)
+
+                # 尾部更新：缓存末端至少差 1 个交易日时，补下载最新数据
+                if max_cached < today - timedelta(days=1):
+                    df_tail = _download(symbol, max_cached + timedelta(days=1), today)
+                    _write_df(con, symbol, df_tail)
 
             result[symbol] = _read_from_cache(con, symbol, start)
     finally:

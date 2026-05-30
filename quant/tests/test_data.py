@@ -146,10 +146,14 @@ def test_fetch_empty_cache_downloads_full_period(tmp_path):
 
 
 def test_fetch_up_to_date_skips_download(tmp_path):
-    """Cache already has today's data — no download should happen."""
+    """Cache covers the full lookback window AND has today's data — no download."""
     db = tmp_path / "p.db"
     con = _open_db(db)
-    _write_df(con, "AAPL", _make_ohlcv([date.today().isoformat()]))
+    today = date.today()
+    # Must cover both ends: start of 1y window (head) and today (tail)
+    # so neither backfill nor tail-update is triggered
+    start_of_window = today - timedelta(days=365)
+    _write_df(con, "AAPL", _make_ohlcv([start_of_window.isoformat(), today.isoformat()]))
     con.close()
 
     with patch("data.prices._download") as mock_dl:

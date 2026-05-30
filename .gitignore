@@ -11,3 +11,5 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+quant/my_portfolio.json
+quant/my_portfolio.csv
