@@ -224,7 +224,7 @@ export async function searchTickers(query: string) {
       `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=8&newsCount=0&enableFuzzyQuery=false`
     );
     return (json?.quotes ?? [])
-      .filter((q: any) => q.quoteType === 'EQUITY')
+      .filter((q: any) => ['EQUITY', 'ETF', 'MUTUALFUND'].includes(q.quoteType))
       .map((q: any) => ({
         symbol: q.symbol as string,
         name: (q.longname || q.shortname || q.symbol) as string,

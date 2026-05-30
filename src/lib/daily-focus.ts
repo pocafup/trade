@@ -82,58 +82,22 @@ async function batchQuotes(
   }
 }
 
-export async function getDailyInsight(heldTickers: string[]): Promise<DailyInsight> {
-  if (_cache && _cache.exp > Date.now()) return _cache.data;
+type Candidate = {
+  ticker: string;
+  name: string;
+  price: number;
+  changePct: number;
+  headlines: string[];
+  isHeld: boolean;
+};
 
-  const trending = await getTrendingTickers();
-  const all = [...new Set([...heldTickers, ...trending])].slice(0, 20);
-
-  const [quotes, newsMap] = await Promise.all([
-    batchQuotes(all),
-    Promise.all(all.map(async t => [t, await getHeadlines(t)] as [string, string[]]))
-      .then(pairs => Object.fromEntries(pairs)),
-  ]);
-
-  const candidates = all.map(t => ({
-    ticker: t,
-    name: quotes[t]?.name ?? t,
-    price: quotes[t]?.price ?? 0,
-    changePct: quotes[t]?.changePct ?? 0,
-    headlines: (newsMap[t] ?? []) as string[],
-    isHeld: heldTickers.includes(t),
-  }));
-
-  const apiKey = process.env.GEMINI_API_KEY;
-  let data: DailyInsight = { focus: [], alerts: [] };
-
-  if (apiKey && candidates.length > 0) {
-    data = await callGemini(candidates, apiKey);
-  } else {
-    // Fallback: top 5 positive movers
-    data.focus = candidates
-      .filter(c => c.changePct > 0 && c.headlines.length > 0)
-      .sort((a, b) => b.changePct - a.changePct)
-      .slice(0, 5)
-      .map(c => ({
-        ticker: c.ticker, name: c.name, price: c.price,
-        changePct: c.changePct, reason: c.headlines[0] ?? '',
-      }));
-  }
-
-  _cache = { data, exp: Date.now() + 6 * 3_600_000 };
-  return data;
-}
-
-async function callGemini(
-  candidates: { ticker: string; name: string; price: number; changePct: number; headlines: string[]; isHeld: boolean }[],
-  apiKey: string,
-): Promise<DailyInsight> {
+function buildPrompt(candidates: Candidate[]): string {
   const stockList = candidates.map(c =>
     `【${c.ticker}】${c.name}（${c.changePct >= 0 ? '+' : ''}${c.changePct.toFixed(2)}%）${c.isHeld ? ' [我持有]' : ''}\n` +
     (c.headlines.length ? c.headlines.map((h, i) => `${i + 1}. ${h}`).join('\n') : '（暂无新闻）')
   ).join('\n\n');
 
-  const prompt = `你是专业股市分析师。以下是今日候选股票及最新新闻标题：
+  return `你是专业股市分析师。以下是今日候选股票及最新新闻标题：
 
 ${stockList}
 
@@ -161,15 +125,128 @@ TICKER|理由
 
 ALERTS:
 （TICKER|HIGH|警告说明 或 NONE）`;
+}
 
+function parseResponse(raw: string, candidates: Candidate[]): DailyInsight {
+  const focusMatch = raw.match(/FOCUS:\n([\s\S]*?)(?:\n\nALERTS:|$)/);
+  const alertsMatch = raw.match(/ALERTS:\n([\s\S]*)$/);
+
+  const focus: FocusStock[] = [];
+  for (const line of (focusMatch?.[1] ?? '').split('\n')) {
+    const idx = line.indexOf('|');
+    if (idx < 0) continue;
+    const ticker = line.slice(0, idx).trim().replace(/[^A-Z0-9.^-]/g, '');
+    const reason = line.slice(idx + 1).trim();
+    if (!ticker || !reason || focus.length >= 5) continue;
+    const c = candidates.find(x => x.ticker === ticker);
+    if (!c) continue;
+    focus.push({ ticker, name: c.name, price: c.price, changePct: c.changePct, reason });
+  }
+
+  const alerts: RiskAlert[] = [];
+  const alertsText = alertsMatch?.[1]?.trim() ?? '';
+  if (alertsText && !alertsText.startsWith('NONE')) {
+    for (const line of alertsText.split('\n')) {
+      const parts = line.split('|');
+      if (parts.length < 3) continue;
+      const ticker = parts[0].trim().replace(/[^A-Z0-9.^-]/g, '');
+      const warning = parts[2].trim();
+      if (!ticker || !warning) continue;
+      const c = candidates.find(x => x.ticker === ticker);
+      if (!c) continue;
+      alerts.push({ ticker, name: c.name, price: c.price, changePct: c.changePct, warning });
+    }
+  }
+
+  return { focus, alerts };
+}
+
+export async function getDailyInsight(heldTickers: string[]): Promise<DailyInsight> {
+  if (_cache && _cache.exp > Date.now()) return _cache.data;
+
+  const trending = await getTrendingTickers();
+  const all = [...new Set([...heldTickers, ...trending])].slice(0, 20);
+
+  const [quotes, newsMap] = await Promise.all([
+    batchQuotes(all),
+    Promise.all(all.map(async t => [t, await getHeadlines(t)] as [string, string[]]))
+      .then(pairs => Object.fromEntries(pairs)),
+  ]);
+
+  const candidates: Candidate[] = all.map(t => ({
+    ticker: t,
+    name: quotes[t]?.name ?? t,
+    price: quotes[t]?.price ?? 0,
+    changePct: quotes[t]?.changePct ?? 0,
+    headlines: (newsMap[t] ?? []) as string[],
+    isHeld: heldTickers.includes(t),
+  }));
+
+  const claudeKey = process.env.ANTHROPIC_API_KEY;
+  const geminiKey = process.env.GEMINI_API_KEY;
+  let data: DailyInsight = { focus: [], alerts: [] };
+
+  if (claudeKey && candidates.length > 0) {
+    data = await callClaude(candidates, claudeKey);
+  } else if (geminiKey && candidates.length > 0) {
+    data = await callGemini(candidates, geminiKey);
+  }
+
+  // Fallback: best movers, with headline if available, otherwise generated reason
+  if (data.focus.length === 0 && candidates.length > 0) {
+    const sorted = [...candidates].sort((a, b) => b.changePct - a.changePct);
+    data.focus = sorted.slice(0, 5).map(c => ({
+      ticker: c.ticker,
+      name: c.name,
+      price: c.price,
+      changePct: c.changePct,
+      reason: c.headlines[0] ??
+        (c.changePct > 0
+          ? `今日涨幅 +${c.changePct.toFixed(2)}%，盘面表现强势，市场关注度持续提升。`
+          : `今日为市场热门关注标的，建议持续跟踪基本面动态。`),
+    }));
+  }
+
+  // Cache: 1 hour for good results, 5 minutes for empty (allow quick retry)
+  const cacheMs = data.focus.length > 0 ? 60 * 60_000 : 5 * 60_000;
+  _cache = { data, exp: Date.now() + cacheMs };
+  return data;
+}
+
+async function callClaude(candidates: Candidate[], apiKey: string): Promise<DailyInsight> {
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1200,
+        messages: [{ role: 'user', content: buildPrompt(candidates) }],
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return { focus: [], alerts: [] };
+    const data = await res.json();
+    const raw: string = data.content?.[0]?.text ?? '';
+    return parseResponse(raw, candidates);
+  } catch {
+    return { focus: [], alerts: [] };
+  }
+}
+
+async function callGemini(candidates: Candidate[], apiKey: string): Promise<DailyInsight> {
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          contents: [{ parts: [{ text: buildPrompt(candidates) }] }],
           generationConfig: { temperature: 0.2, maxOutputTokens: 1200 },
         }),
         signal: AbortSignal.timeout(30_000),
@@ -178,39 +255,7 @@ ALERTS:
     if (!res.ok) return { focus: [], alerts: [] };
     const data = await res.json();
     const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-
-    // Parse FOCUS
-    const focusMatch = raw.match(/FOCUS:\n([\s\S]*?)(?:\n\nALERTS:|$)/);
-    const alertsMatch = raw.match(/ALERTS:\n([\s\S]*)$/);
-
-    const focus: FocusStock[] = [];
-    for (const line of (focusMatch?.[1] ?? '').split('\n')) {
-      const idx = line.indexOf('|');
-      if (idx < 0) continue;
-      const ticker = line.slice(0, idx).trim().replace(/[^A-Z0-9.^-]/g, '');
-      const reason = line.slice(idx + 1).trim();
-      if (!ticker || !reason || focus.length >= 5) continue;
-      const c = candidates.find(x => x.ticker === ticker);
-      if (!c) continue;
-      focus.push({ ticker, name: c.name, price: c.price, changePct: c.changePct, reason });
-    }
-
-    const alerts: RiskAlert[] = [];
-    const alertsText = alertsMatch?.[1]?.trim() ?? '';
-    if (alertsText && !alertsText.startsWith('NONE')) {
-      for (const line of alertsText.split('\n')) {
-        const parts = line.split('|');
-        if (parts.length < 3) continue;
-        const ticker = parts[0].trim().replace(/[^A-Z0-9.^-]/g, '');
-        const warning = parts[2].trim();
-        if (!ticker || !warning) continue;
-        const c = candidates.find(x => x.ticker === ticker);
-        if (!c) continue;
-        alerts.push({ ticker, name: c.name, price: c.price, changePct: c.changePct, warning });
-      }
-    }
-
-    return { focus, alerts };
+    return parseResponse(raw, candidates);
   } catch {
     return { focus: [], alerts: [] };
   }
