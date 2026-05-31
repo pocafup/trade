@@ -18,9 +18,12 @@ services:
     container_name: quant-service
     ports:
       - "8001:8000"
+    volumes:
+      - trade_data:/data:ro
     environment:
       - APCA_API_KEY_ID=${APCA_API_KEY_ID}
       - APCA_API_SECRET_KEY=${APCA_API_SECRET_KEY}
+      - DB_PATH=/data/trade.db
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]

@@ -15,11 +15,16 @@
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 
-# trade.db 默认位置：quant/data/holdings.py → ../../../data/trade.db
-_DEFAULT_DB = Path(__file__).parent.parent.parent / "data" / "trade.db"
+# 优先读环境变量 DB_PATH（Docker 部署时注入），否则按本地相对路径推断
+_DEFAULT_DB = (
+    Path(os.environ["DB_PATH"])
+    if os.environ.get("DB_PATH")
+    else Path(__file__).parent.parent.parent / "data" / "trade.db"
+)
 
 # 浮点残值过滤阈值：净持股低于此值视为已清仓
 _MIN_SHARES = 1e-9
