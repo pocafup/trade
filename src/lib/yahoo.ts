@@ -57,7 +57,8 @@ export async function getQuote(ticker: string) {
 
   try {
     const json = await yfFetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`
+      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,
+      true
     );
     const meta = json?.chart?.result?.[0]?.meta;
     if (!meta) return null;
