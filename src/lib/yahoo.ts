@@ -12,11 +12,13 @@ async function getAuth() {
   const fcRes = await fetch('https://fc.yahoo.com/', {
     headers: { 'User-Agent': UA },
     redirect: 'follow',
+    cache: 'no-store',
   });
   _cookie = fcRes.headers.get('set-cookie') ?? '';
 
   const crumbRes = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
     headers: { 'User-Agent': UA, Cookie: _cookie },
+    cache: 'no-store',
   });
   _crumb = await crumbRes.text();
   _crumbExpiry = Date.now() + 50 * 60 * 1000;
@@ -33,7 +35,7 @@ async function yfFetch(url: string, needsCrumb = false) {
     fullUrl += (url.includes('?') ? '&' : '?') + `crumb=${encodeURIComponent(crumb)}`;
   }
 
-  const res = await fetch(fullUrl, { headers });
+  const res = await fetch(fullUrl, { headers, cache: 'no-store' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
