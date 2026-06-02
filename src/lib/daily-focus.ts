@@ -190,7 +190,8 @@ function parseResponse(raw: string, allCandidates: Candidate[]): DailyInsight {
       const ticker = parts[0].trim().replace(/[^A-Z0-9.^-]/g, '');
       const warning = parts[2].trim();
       if (!ticker || !warning) continue;
-      const c = allCandidates.find(x => x.ticker === ticker);
+      // 只允许真正持仓的股票出现在预警里，防止 AI 把市场热股混入
+      const c = allCandidates.find(x => x.ticker === ticker && x.isHeld);
       if (!c) continue;
       alerts.push({ ticker, name: c.name, price: c.price, changePct: c.changePct, warning });
     }
