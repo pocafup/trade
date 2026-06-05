@@ -129,10 +129,14 @@ export async function getQuoteSummary(ticker: string) {
   if (cached && cached.expiry > Date.now()) return cached.data;
 
   try {
-    const [chartJson, summaryJson] = await Promise.all([
+    const [chartJson, summaryJson, earningsJson] = await Promise.all([
       yfFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`),
       yfFetch(
         `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=financialData,defaultKeyStatistics,summaryProfile,calendarEvents,summaryDetail,earnings`,
+        true
+      ).catch(() => null),
+      yfFetch(
+        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=earningsHistory`,
         true
       ).catch(() => null),
     ]);
@@ -149,16 +153,26 @@ export async function getQuoteSummary(ticker: string) {
     const detail = r0.summaryDetail ?? {};
     const earningsModule = r0.earnings ?? {};
 
-    // Build quarterly earnings history (EPS actual vs estimate + revenue)
+    // 主路径：earnings 模块（earningsChart.quarterly + financialsChart.quarterly）
     const qEps: any[]  = earningsModule.earningsChart?.quarterly  ?? [];
     const qRev: any[]  = earningsModule.financialsChart?.quarterly ?? [];
     const revMap = new Map(qRev.map((q: any) => [q.date, { revenue: raw(q.revenue), netIncome: raw(q.earnings) }]));
-    const earningsHistory = [...qEps].reverse().map((q: any) => ({
+    let earningsHistory = [...qEps].reverse().map((q: any) => ({
       period:      q.date,
       epsActual:   raw(q.actual),
       epsEstimate: raw(q.estimate),
       ...(revMap.get(q.date) ?? {}),
     }));
+
+    // 备用路径：earningsHistory 模块（Yahoo 有时会把数据挪到这里）
+    if (!earningsHistory.length) {
+      const eh: any[] = earningsJson?.quoteSummary?.result?.[0]?.earningsHistory?.history ?? [];
+      earningsHistory = [...eh].reverse().map((q: any) => ({
+        period:      q.period ?? q.quarter?.fmt ?? '',
+        epsActual:   raw(q.epsActual),
+        epsEstimate: raw(q.epsEstimate),
+      }));
+    }
 
     const earningsDate: number[] = (cal.earnings?.earningsDate ?? [])
       .map((d: any) => (typeof d === 'object' && d.raw ? d.raw * 1000 : typeof d === 'number' ? d * 1000 : null))

@@ -1,24 +1,30 @@
 import { NextResponse } from 'next/server';
-import { getQuote } from '@/lib/yahoo';
+import { getQuote, getQuoteSummary } from '@/lib/yahoo';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: Request) {
+  const ticker = new URL(req.url).searchParams.get('t') ?? 'AAPL';
   const start = Date.now();
-  try {
-    const q = await getQuote('AAPL');
-    return NextResponse.json({
-      ok: q !== null,
-      ticker: 'AAPL',
-      price: q?.price ?? null,
-      marketState: q?.marketState ?? null,
-      latencyMs: Date.now() - start,
-    });
-  } catch (err) {
-    return NextResponse.json({
-      ok: false,
-      error: String(err),
-      latencyMs: Date.now() - start,
-    }, { status: 502 });
-  }
+
+  const [quote, summary] = await Promise.all([
+    getQuote(ticker).catch((e: unknown) => ({ error: String(e) })),
+    getQuoteSummary(ticker).catch((e: unknown) => ({ error: String(e) })),
+  ]);
+
+  return NextResponse.json({
+    ticker,
+    latencyMs: Date.now() - start,
+    quote: {
+      ok: quote !== null && !('error' in (quote as object)),
+      price: (quote as any)?.price ?? null,
+      error: (quote as any)?.error ?? null,
+    },
+    earnings: {
+      historyLength: (summary as any)?.summary?.earningsHistory?.length ?? 0,
+      sample: (summary as any)?.summary?.earningsHistory?.slice(0, 1) ?? null,
+      summaryOk: summary !== null && !('error' in (summary as object)),
+      error: (summary as any)?.error ?? null,
+    },
+  });
 }
