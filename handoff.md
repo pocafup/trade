@@ -174,8 +174,60 @@ Docker 内自动用 Dockerfile CMD 启动，无需手动。
 
 ---
 
+## 财报数据（反复出问题，必读）
+
+**症状**：个股详情页"往期财报"区块消失。
+
+**根本原因**：Yahoo Finance 会不定期把季度 EPS 数据从一个模块搬到另一个模块，无预警。
+
+### 根本原因（2026-06-05 确认）
+
+**`earnings` 模块此前被捆绑在含 `summaryDetail` 的大请求里**。只要 `summaryDetail` 等模块失败，整个请求返回 null，earnings 跟着丢失。**已修复：`earnings` 现在是独立请求。**
+
+### 当前解析优先级（`yahoo.ts` `getQuoteSummary`）
+
+每条路径均独立请求，互不影响：
+
+| 优先级 | 模块 | 字段路径 | 包含 |
+|--------|------|----------|------|
+| 1 | `earnings`（独立请求） | `earningsChart.quarterly[].{date,actual,estimate}` + `financialsChart.quarterly[].{revenue,earnings}` | EPS实际+预期+营收 |
+| 2 | `earningsHistory` | `history[].{epsActual,epsEstimate,quarter.fmt}` | EPS实际+预期 |
+| 3 | `incomeStatementHistoryQuarterly` | `incomeStatementHistory[].{endDate,totalRevenue,netIncome}` | 营收+净利润（无EPS） |
+
+路径 1 → 2 → 3 依次尝试，全空才显示空。
+
+### 实测数据结构（ARM，2026-06-05）
+
+- `earnings.earningsChart.quarterly[].date` 格式：`"2Q2025"`（直接传给前端 `fmtQuarter`）
+- `earningsHistory.history[].quarter.fmt` 格式：**`"YYYY-MM-DD"`**（如 `"2025-06-30"`），用 `-` 分割，月份 ÷ 3 向上取整得季度
+- `earningsHistory.history[].period` 是 `"-4q"` 等相对标签，**不是**季度名称，不要用这个字段
+
+### 排查步骤
+
+**第一步**：访问 `/api/debug?t=ARM`，看 `lengths` 字段：
+
+```json
+{ "earningsQLen": 0, "earningsHistLen": 0, "incomeQLen": 4, "trendLen": 5 }
+```
+
+哪个 `Len > 0`，就说明哪条路径当前有数据。
+
+**第二步**：根据结果修改 `getQuoteSummary`（`src/lib/yahoo.ts`）：
+- 路径 1 有数据但显示空 → 检查 `earningsChart.quarterly` 字段名是否变了（看 `path1_earnings_quarterly` 原始结构）
+- 路径 2 有数据但显示空 → 检查 `quarter.fmt` 格式，日期转季度逻辑在那里
+- 路径 3 是兜底（目前已接入），只显示营收，没有 EPS
+- 路径 4（`earningsTrend`）只有分析师预期，没有历史实际值，通常用处不大
+
+**第三步**：改完后把 `lengths` 的新状态更新回这个表格。
+
+### 注意
+- `earningsHistory.history[].period` 是 `"+4q"` 这类相对标签，**不是**季度名称；真正的日期在 `quarter.fmt`（格式 `"M/DD/YYYY"`）
+- `incomeStatementHistoryQuarterly.incomeStatementHistory[].endDate.fmt` 格式是 `"YYYY-MM-DD"`，季度转换：月份 ÷ 3 向上取整
+
+---
+
 ## 未解决 / 待跟进
 
-1. **财报数据为空**：`/api/debug?t=ARM` 显示 `earningsHistory.historyLength = 0`，需要看原始 Yahoo 响应确定哪个字段现在有数据，然后修改 `getQuoteSummary` 的解析逻辑。
+1. **财报 EPS 数据**：如果路径 1/2 都是 0，当前兜底到路径 3（仅营收）。下次炸了先看 `/api/debug?t=ARM` 的 `lengths`，按上面排查步骤处理。
 2. **主页资产价格刷新**：已加 `cache: 'no-store'` + crumb，如果还有问题先访问 `/api/debug?t=ARM` 确认 `quote.ok` 是否为 true。
-3. **debug 端点**（`/api/debug`）：诊断用，建议财报修好后加 middleware 鉴权或删除。
+3. **debug 端点**（`/api/debug`）：诊断用，建议加 middleware 鉴权（目前 401 需要登录才能访问，已有一定保护）。

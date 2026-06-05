@@ -18,16 +18,25 @@ export async function GET(req: Request) {
   const ticker = (new URL(req.url).searchParams.get('t') ?? 'ARM').toUpperCase();
 
   const raw = await yfRaw(
-    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=earnings,earningsHistory,incomeStatementHistoryQuarterly`
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=earnings,earningsHistory,incomeStatementHistoryQuarterly,earningsTrend`
   ).catch(() => null);
 
   const r0 = raw?.quoteSummary?.result?.[0] ?? null;
 
+  // 各路径当前实际长度 — 用于快速判断哪条路径有数据
+  const earningsQLen    = r0?.earnings?.earningsChart?.quarterly?.length ?? 0;
+  const earningsHistLen = r0?.earningsHistory?.history?.length ?? 0;
+  const incomeQLen      = r0?.incomeStatementHistoryQuarterly?.incomeStatementHistory?.length ?? 0;
+  const trendLen        = r0?.earningsTrend?.trend?.length ?? 0;
+
   return NextResponse.json({
     ticker,
     topLevelKeys: r0 ? Object.keys(r0) : null,
-    earnings: r0?.earnings ?? null,
-    earningsHistory: r0?.earningsHistory ?? null,
-    incomeStatementQ: r0?.incomeStatementHistoryQuarterly?.incomeStatementHistory?.slice(0, 2) ?? null,
+    lengths: { earningsQLen, earningsHistLen, incomeQLen, trendLen },
+    // 各路径原始前两条数据
+    path1_earnings_quarterly: r0?.earnings?.earningsChart?.quarterly?.slice(0, 2) ?? null,
+    path2_earningsHistory:    r0?.earningsHistory?.history?.slice(0, 2) ?? null,
+    path3_incomeStatementQ:   r0?.incomeStatementHistoryQuarterly?.incomeStatementHistory?.slice(0, 2) ?? null,
+    path4_earningsTrend:      r0?.earningsTrend?.trend?.slice(0, 2) ?? null,
   });
 }

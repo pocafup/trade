@@ -5,24 +5,33 @@ const UA =
 let _crumb = '';
 let _cookie = '';
 let _crumbExpiry = 0;
+let _authInFlight: Promise<{ crumb: string; cookie: string }> | null = null;
 
 async function getAuth() {
   if (_crumb && _crumbExpiry > Date.now()) return { crumb: _crumb, cookie: _cookie };
 
-  const fcRes = await fetch('https://fc.yahoo.com/', {
-    headers: { 'User-Agent': UA },
-    redirect: 'follow',
-    cache: 'no-store',
-  });
-  _cookie = fcRes.headers.get('set-cookie') ?? '';
+  // 多个并发请求同时触发 getAuth 时，只发一次 crumb 请求，其余等待同一个 promise
+  if (!_authInFlight) {
+    _authInFlight = (async () => {
+      const fcRes = await fetch('https://fc.yahoo.com/', {
+        headers: { 'User-Agent': UA },
+        redirect: 'follow',
+        cache: 'no-store',
+      });
+      _cookie = fcRes.headers.get('set-cookie') ?? '';
 
-  const crumbRes = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
-    headers: { 'User-Agent': UA, Cookie: _cookie },
-    cache: 'no-store',
-  });
-  _crumb = await crumbRes.text();
-  _crumbExpiry = Date.now() + 50 * 60 * 1000;
-  return { crumb: _crumb, cookie: _cookie };
+      const crumbRes = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+        headers: { 'User-Agent': UA, Cookie: _cookie },
+        cache: 'no-store',
+      });
+      _crumb = await crumbRes.text();
+      _crumbExpiry = Date.now() + 50 * 60 * 1000;
+      _authInFlight = null;
+      return { crumb: _crumb, cookie: _cookie };
+    })();
+  }
+
+  return _authInFlight;
 }
 
 async function yfFetch(url: string, needsCrumb = false) {
@@ -129,14 +138,14 @@ export async function getQuoteSummary(ticker: string) {
   if (cached && cached.expiry > Date.now()) return cached.data;
 
   try {
-    const [chartJson, summaryJson, earningsJson] = await Promise.all([
+    const [chartJson, summaryJson, fallbackJson] = await Promise.all([
       yfFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`),
       yfFetch(
-        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=financialData,defaultKeyStatistics,summaryProfile,calendarEvents,summaryDetail,earnings`,
+        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=financialData,defaultKeyStatistics,summaryProfile,calendarEvents,earnings`,
         true
       ).catch(() => null),
       yfFetch(
-        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=earningsHistory`,
+        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=earningsHistory,incomeStatementHistoryQuarterly`,
         true
       ).catch(() => null),
     ]);
@@ -150,8 +159,7 @@ export async function getQuoteSummary(ticker: string) {
     const stats = r0.defaultKeyStatistics ?? {};
     const profile = r0.summaryProfile ?? {};
     const cal = r0.calendarEvents ?? {};
-    const detail = r0.summaryDetail ?? {};
-    const earningsModule = r0.earnings ?? {};
+    const earningsModule = summaryJson?.quoteSummary?.result?.[0]?.earnings ?? {};
 
     // 主路径：earnings 模块（earningsChart.quarterly + financialsChart.quarterly）
     const qEps: any[]  = earningsModule.earningsChart?.quarterly  ?? [];
@@ -164,14 +172,37 @@ export async function getQuoteSummary(ticker: string) {
       ...(revMap.get(q.date) ?? {}),
     }));
 
-    // 备用路径：earningsHistory 模块（Yahoo 有时会把数据挪到这里）
+    // 备用路径 2：earningsHistory 模块
+    // quarter.fmt 格式实测为 "YYYY-MM-DD"（如 "2025-06-30"），period 是 "-4q" 等相对标签
     if (!earningsHistory.length) {
-      const eh: any[] = earningsJson?.quoteSummary?.result?.[0]?.earningsHistory?.history ?? [];
-      earningsHistory = [...eh].reverse().map((q: any) => ({
-        period:      q.period ?? q.quarter?.fmt ?? '',
-        epsActual:   raw(q.epsActual),
-        epsEstimate: raw(q.epsEstimate),
-      }));
+      const eh: any[] = fallbackJson?.quoteSummary?.result?.[0]?.earningsHistory?.history ?? [];
+      earningsHistory = [...eh].reverse().map((q: any) => {
+        const fmt = q.quarter?.fmt ?? '';           // "2025-06-30"
+        const parts = fmt.split('-').map(Number);   // [2025, 6, 30]
+        const period = (parts[0] && parts[1])
+          ? `${Math.ceil(parts[1] / 3)}Q${parts[0]}` : (q.period ?? fmt);
+        return { period, epsActual: raw(q.epsActual), epsEstimate: raw(q.epsEstimate) };
+      });
+    }
+
+    // 备用路径 3：incomeStatementHistoryQuarterly（无 EPS，但有季度营收/净利润）
+    // 当前两条路径都失效时用这条兜底，至少能显示营收趋势
+    if (!earningsHistory.length) {
+      const ih: any[] = fallbackJson?.quoteSummary?.result?.[0]
+        ?.incomeStatementHistoryQuarterly?.incomeStatementHistory ?? [];
+      earningsHistory = ih.map((q: any) => {
+        const fmt = q.endDate?.fmt ?? '';           // "2024-03-31"
+        const parts = fmt.split('-').map(Number);
+        const period = (parts[0] && parts[1])
+          ? `${Math.ceil(parts[1] / 3)}Q${parts[0]}` : fmt;
+        return {
+          period,
+          epsActual: null,
+          epsEstimate: null,
+          revenue: raw(q.totalRevenue),
+          netIncome: raw(q.netIncome),
+        };
+      });
     }
 
     const earningsDate: number[] = (cal.earnings?.earningsDate ?? [])
@@ -214,7 +245,7 @@ export async function getQuoteSummary(ticker: string) {
           pegRatio: raw(stats.pegRatio),
           priceToBook: raw(stats.priceToBook),
           beta: raw(stats.beta),
-          dividendYield: raw(detail.dividendYield ?? detail.trailingAnnualDividendYield),
+          dividendYield: raw(stats.dividendYield ?? stats.trailingAnnualDividendYield),
         },
         summaryProfile: {
           sector: profile.sector,
