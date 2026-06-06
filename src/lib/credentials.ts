@@ -13,9 +13,19 @@ function hashPassword(password: string): string {
 
 function checkPassword(password: string, stored: string): boolean {
   try {
-    const [salt, hash] = stored.split(':');
-    const derived = scryptSync(password, salt, 32).toString('hex');
-    return timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(derived, 'hex'));
+    if (stored.startsWith('scrypt:')) {
+      // user-admin.js 写入格式：scrypt:<base64-salt>:<base64-hash>（64字节）
+      const parts = stored.split(':');
+      const salt    = parts[1];
+      const hash    = parts[2];
+      const derived = scryptSync(password, salt, 64).toString('base64');
+      return timingSafeEqual(Buffer.from(hash, 'base64'), Buffer.from(derived, 'base64'));
+    } else {
+      // 旧 credentials 表格式：<hex-salt>:<hex-hash>（32字节）
+      const [salt, hash] = stored.split(':');
+      const derived = scryptSync(password, salt, 32).toString('hex');
+      return timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(derived, 'hex'));
+    }
   } catch { return false; }
 }
 
@@ -31,12 +41,18 @@ function ensureSeeded() {
 }
 
 export function validateCredentials(username: string, password: string): boolean {
-  ensureSeeded();
   const db = getDb();
+
+  // 先查 users 表（多用户系统）
+  const userRow = db.prepare('SELECT password_hash FROM users WHERE username = ?').get(username) as
+    { password_hash: string } | undefined;
+  if (userRow) return checkPassword(password, userRow.password_hash);
+
+  // fallback：老的单用户 credentials 表
+  ensureSeeded();
   const row = db.prepare('SELECT username, password_hash FROM credentials LIMIT 1').get() as
     { username: string; password_hash: string } | undefined;
-  if (!row) return false;
-  if (row.username !== username) return false;
+  if (!row || row.username !== username) return false;
   return checkPassword(password, row.password_hash);
 }
 
