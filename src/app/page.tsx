@@ -8,7 +8,7 @@ import TransactionModal from '@/components/TransactionModal';
 import FontSizeToggle from '@/components/FontSizeToggle';
 import type { DailyInsight } from '@/lib/daily-focus';
 
-interface Summary { totalValue: number; totalCost: number; totalPnl: number; totalPnlPct: number; ytdPnl: number; ytdPnlPct: number; currentCash: number; ytdNetPnl: number; annualReturn: number | null }
+interface Summary { totalValue: number; totalCost: number; totalPnl: number; totalPnlPct: number; ytdPnl: number; ytdPnlPct: number; currentCash: number; ytdNetPnl: number; ytdDividends: number; annualReturn: number | null }
 interface Holding { ticker: string; name: string; shares: number; avgCost: number; currentPrice: number; currentValue: number; pnl: number; pnlPct: number; dayChange: number; dayChangePct: number; portfolioPct: number }
 interface WatchItem { ticker: string; name: string; price: number; change: number; changePct: number }
 interface PnlRecord { ticker: string; name: string; status: 'open' | 'closed'; realizedPnl: number; unrealizedPnl: number; totalPnl: number; currentShares: number; currentPrice: number; avgCost: number; firstBuyDate: string; lastActivityDate: string; holdingDays: number }
@@ -996,9 +996,14 @@ function CapitalTab({
           <div>
             <p className="text-xs text-[#6B7E9C] mb-1">今年净赚（假设清仓）</p>
             {summary ? (
-              <p className={`font-mono font-bold text-lg ${summary.ytdNetPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {summary.ytdNetPnl >= 0 ? '+' : ''}${fmt(summary.ytdNetPnl)}
-              </p>
+              <>
+                <p className={`font-mono font-bold text-lg ${summary.ytdNetPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {summary.ytdNetPnl >= 0 ? '+' : ''}${fmt(summary.ytdNetPnl)}
+                </p>
+                {summary.ytdDividends > 0.01 && (
+                  <p className="text-xs text-[#6B7E9C] mt-0.5">含分红 +${fmt(summary.ytdDividends)}</p>
+                )}
+              </>
             ) : <div className="h-6 w-20 bg-[#172033] rounded animate-pulse" />}
           </div>
           <div>

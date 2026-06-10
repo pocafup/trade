@@ -59,6 +59,7 @@ const quoteCache    = new Map<string, { data: any; expiry: number }>();
 const summaryCache  = new Map<string, { data: any; expiry: number }>();
 const chartCache    = new Map<string, { data: any; expiry: number }>();
 const ytdPriceCache = new Map<string, { price: number; expiry: number }>();
+const dividendCache = new Map<string, { data: { date: number; amount: number }[]; expiry: number }>();
 
 // ── Public API ───────────────────────────────────────────────────────────────
 export async function getQuote(ticker: string) {
@@ -319,6 +320,29 @@ export async function getNewsExpanded(
         publisher: (n.publisher ?? '') as string,
         ts:        (n.providerPublishTime as number) * 1000,
       }));
+  } catch {
+    return [];
+  }
+}
+
+// 返回某 ticker 过去 1 年内所有除权日（ex-dividend date）及每股分红金额
+// 缓存 6 小时（分红数据几乎不会日内变化）
+export async function getDividends(ticker: string): Promise<{ date: number; amount: number }[]> {
+  const cached = dividendCache.get(ticker);
+  if (cached && cached.expiry > Date.now()) return cached.data;
+
+  try {
+    const json = await yfFetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1y&events=dividends`
+    );
+    const rawDivs: Record<string, { date: number; amount: number }> =
+      json?.chart?.result?.[0]?.events?.dividends ?? {};
+    const data = Object.values(rawDivs).map((d) => ({
+      date: d.date * 1000,   // Yahoo 返回 Unix 秒，转成毫秒
+      amount: d.amount,
+    }));
+    dividendCache.set(ticker, { data, expiry: Date.now() + 6 * 60 * 60 * 1000 });
+    return data;
   } catch {
     return [];
   }

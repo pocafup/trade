@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import { getQuote, getYearStartPrice } from '@/lib/yahoo';
+import { getQuote, getYearStartPrice, getDividends } from '@/lib/yahoo';
 
 export const dynamic = 'force-dynamic';
 
@@ -165,7 +165,32 @@ export async function GET() {
   // 等价于：年初以来每只股票的价格变动 × 持有数量之和
   const ytdNetPnl = totalValue + ytdSellProceeds - jan1PortfolioValue - ytdBuyCosts;
 
-  // Annual return: ytdNetPnl / Σ(daily cumulative balance) * 365
+  // YTD 分红：对每只 ticker 抓取除权日 + 每股金额，乘以当天持股数
+  // 除权日当天或之前持股才算收到分红（Yahoo events.dividends 用除权日，不是派息日）
+  const allDivData = await Promise.all(
+    Array.from(byTicker.keys()).map((t) => getDividends(t))
+  );
+  const divMap = new Map(
+    Array.from(byTicker.keys()).map((t, i) => [t, allDivData[i]])
+  );
+
+  let ytdDividends = 0;
+  for (const [ticker, { txns }] of byTicker) {
+    const divs = divMap.get(ticker) ?? [];
+    for (const div of divs) {
+      const divDateStr = new Date(div.date).toISOString().split('T')[0];
+      if (divDateStr < yearStart) continue;   // 只算今年的分红
+      // 计算除权日当天持股数（txns 按 date ASC 排序）
+      let sharesHeld = 0;
+      for (const txn of txns) {
+        if (txn.date > divDateStr) break;
+        sharesHeld += txn.type === 'buy' ? txn.quantity : -txn.quantity;
+      }
+      if (sharesHeld > 0.0001) ytdDividends += sharesHeld * div.amount;
+    }
+  }
+
+  // Annual return: (ytdNetPnl + ytdDividends) / Σ(daily cumulative balance) * 365
   // Daily balance = cumulative net deposits (cash flow-based, per the Modified Dietz approach)
   let annualReturn: number | null = null;
   if (cashFlows.length > 0) {
@@ -196,7 +221,7 @@ export async function GET() {
       cur.setDate(cur.getDate() + 1);
     }
 
-    if (dailySum > 0) annualReturn = (ytdNetPnl / dailySum) * 365 * 100;
+    if (dailySum > 0) annualReturn = ((ytdNetPnl + ytdDividends) / dailySum) * 365 * 100;
   }
 
   return NextResponse.json({
@@ -209,7 +234,8 @@ export async function GET() {
       ytdPnl,
       ytdPnlPct: totalCost > 0 ? (ytdPnl / totalCost) * 100 : 0,
       currentCash,
-      ytdNetPnl,
+      ytdNetPnl: ytdNetPnl + ytdDividends,
+      ytdDividends,
       annualReturn,
     },
   });
