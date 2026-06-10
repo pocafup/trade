@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import { getQuote } from '@/lib/yahoo';
+import { getQuote, getYearStartPrice } from '@/lib/yahoo';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,8 +27,9 @@ export async function GET() {
   const quotes = await Promise.all(tickers.map((t) => getQuote(t)));
   const quoteMap = new Map(tickers.map((t, i) => [t, quotes[i]]));
 
-  // YTD realized P&L: gains from sell transactions since Jan 1 of current year
   const yearStart = `${new Date().getFullYear()}-01-01`;
+
+  // YTD realized P&L: gains from sell transactions since Jan 1 (using avg cost basis)
   let ytdPnl = 0;
   for (const [, { txns }] of byTicker) {
     let avgCost = 0, shares = 0;
@@ -42,6 +43,54 @@ export async function GET() {
         shares -= txn.quantity;
         if (shares < 0.0001) { shares = 0; avgCost = 0; }
       }
+    }
+  }
+
+  // 年初持仓：每个 ticker 在 yearStart 前所有交易的净持股数
+  const sharesAtYearStart = new Map<string, number>();
+  for (const [ticker, { txns }] of byTicker) {
+    let s = 0;
+    for (const t of txns) {
+      if (t.date >= yearStart) break;
+      s += t.type === 'buy' ? t.quantity : -t.quantity;
+    }
+    if (s > 0.0001) sharesAtYearStart.set(ticker, s);
+  }
+
+  // 获取年初有持仓的 ticker 的第一个交易日收盘价
+  const ytdStartPriceMap = new Map<string, number>();
+  await Promise.all(
+    Array.from(sharesAtYearStart.keys()).map(async (ticker) => {
+      const price = await getYearStartPrice(ticker);
+      if (price > 0) ytdStartPriceMap.set(ticker, price);
+    })
+  );
+
+  // 年初组合市值：年初持股 × 年初价格
+  // 若取不到年初价格则用该股票的历史均价兜底
+  let jan1PortfolioValue = 0;
+  for (const [ticker, shares] of sharesAtYearStart) {
+    const jan1Price = ytdStartPriceMap.get(ticker);
+    if (jan1Price) {
+      jan1PortfolioValue += shares * jan1Price;
+    } else {
+      // 兜底：用年初前所有买入的加权均价
+      const preBuys = byTicker.get(ticker)!.txns.filter(
+        (t) => t.date < yearStart && t.type === 'buy'
+      );
+      const cost = preBuys.reduce((s, t) => s + t.quantity * t.price, 0);
+      const qty  = preBuys.reduce((s, t) => s + t.quantity, 0);
+      jan1PortfolioValue += shares * (qty > 0 ? cost / qty : 0);
+    }
+  }
+
+  // 今年买入成本 & 卖出收入
+  let ytdBuyCosts = 0, ytdSellProceeds = 0;
+  for (const [, { txns }] of byTicker) {
+    for (const t of txns) {
+      if (t.date < yearStart) continue;
+      if (t.type === 'buy') ytdBuyCosts    += t.quantity * t.price;
+      else                  ytdSellProceeds += t.quantity * t.price;
     }
   }
 
@@ -112,8 +161,9 @@ export async function GET() {
     ? totalDeposited - totalWithdrawn - netStockSpend
     : -netStockSpend; // default: negative = "not configured yet"
 
-  // If sold everything today, total net P&L this year
-  const ytdNetPnl = ytdPnl + (totalValue - totalCost);
+  // 今年净赚 = 当前市值 + 今年卖出收入 − 年初组合市值 − 今年买入成本
+  // 等价于：年初以来每只股票的价格变动 × 持有数量之和
+  const ytdNetPnl = totalValue + ytdSellProceeds - jan1PortfolioValue - ytdBuyCosts;
 
   // Annual return: ytdNetPnl / Σ(daily cumulative balance) * 365
   // Daily balance = cumulative net deposits (cash flow-based, per the Modified Dietz approach)

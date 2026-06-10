@@ -55,9 +55,10 @@ function raw(v: any): number | null {
 }
 
 // ── Caches ───────────────────────────────────────────────────────────────────
-const quoteCache = new Map<string, { data: any; expiry: number }>();
-const summaryCache = new Map<string, { data: any; expiry: number }>();
-const chartCache = new Map<string, { data: any; expiry: number }>();
+const quoteCache    = new Map<string, { data: any; expiry: number }>();
+const summaryCache  = new Map<string, { data: any; expiry: number }>();
+const chartCache    = new Map<string, { data: any; expiry: number }>();
+const ytdPriceCache = new Map<string, { price: number; expiry: number }>();
 
 // ── Public API ───────────────────────────────────────────────────────────────
 export async function getQuote(ticker: string) {
@@ -263,6 +264,26 @@ export async function getQuoteSummary(ticker: string) {
     return data;
   } catch {
     return null;
+  }
+}
+
+// 返回当年第一个交易日的收盘价（YTD 收益计算用）
+// 缓存 6 小时，价格不会变
+export async function getYearStartPrice(ticker: string): Promise<number> {
+  const cached = ytdPriceCache.get(ticker);
+  if (cached && cached.expiry > Date.now()) return cached.price;
+
+  try {
+    const json = await yfFetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=ytd`
+    );
+    const result = json?.chart?.result?.[0];
+    const closes: (number | null)[] = result?.indicators?.quote?.[0]?.close ?? [];
+    const price = closes.find((c) => c != null) ?? 0;
+    ytdPriceCache.set(ticker, { price, expiry: Date.now() + 6 * 60 * 60 * 1000 });
+    return price;
+  } catch {
+    return 0;
   }
 }
 
