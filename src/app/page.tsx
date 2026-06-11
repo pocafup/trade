@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, RefreshCw, TrendingUp, TrendingDown, BarChart3, Search, ArrowUpDown, X, AlertTriangle, Zap, Star, Trash2, LogOut, KeyRound, Eye, EyeOff, ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react';
+import { Plus, RefreshCw, TrendingUp, TrendingDown, BarChart3, Search, ArrowUpDown, X, AlertTriangle, Zap, Star, Trash2, LogOut, KeyRound, Eye, EyeOff, ChevronDown, ChevronUp, ShieldAlert, Globe } from 'lucide-react';
 import HoldingsTable from '@/components/HoldingsTable';
 import TransactionList from '@/components/TransactionList';
 import TransactionModal from '@/components/TransactionModal';
@@ -211,6 +211,10 @@ export default function Dashboard() {
             <FontSizeToggle />
             <button onClick={() => load(false)} className="p-2 rounded-lg hover:bg-[#172033] text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">
               <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+            </button>
+            <button onClick={() => router.push('/macro')} title="宏观大盘"
+              className="p-2 rounded-lg hover:bg-[#172033] text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">
+              <Globe size={15} />
             </button>
             <button onClick={() => router.push('/risk')} title="风险分析"
               className="p-2 rounded-lg hover:bg-[#172033] text-[#6B7E9C] hover:text-[#E8EDFB] transition-colors">

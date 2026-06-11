@@ -10,6 +10,7 @@ services:
       - DB_PATH=/app/data/trade.db
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - FRED_API_KEY=${FRED_API_KEY}
       - QUANT_SERVICE_URL=http://quant:8000
     restart: unless-stopped
 
