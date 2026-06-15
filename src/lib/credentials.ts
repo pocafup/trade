@@ -14,12 +14,12 @@ function hashPassword(password: string): string {
 function checkPassword(password: string, stored: string): boolean {
   try {
     if (stored.startsWith('scrypt:')) {
-      // user-admin.js 写入格式：scrypt:<base64-salt>:<base64-hash>（64字节）
+      // user-admin.js 写入格式：scrypt:<hex-salt>:<hex-hash>（64字节）
       const parts = stored.split(':');
       const salt    = parts[1];
       const hash    = parts[2];
-      const derived = scryptSync(password, salt, 64).toString('base64');
-      return timingSafeEqual(Buffer.from(hash, 'base64'), Buffer.from(derived, 'base64'));
+      const derived = scryptSync(password, salt, 64).toString('hex');
+      return timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(derived, 'hex'));
     } else {
       // 旧 credentials 表格式：<hex-salt>:<hex-hash>（32字节）
       const [salt, hash] = stored.split(':');
