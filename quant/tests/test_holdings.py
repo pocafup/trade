@@ -12,6 +12,8 @@ Unit tests for data.holdings.load_holdings().
   - 浮点残值过滤（buy 10.0, sell 10 - ε → 视为清仓）
   - 只读模式：对同一文件发起 INSERT 时应抛出 OperationalError
   - 文件不存在时抛出 FileNotFoundError
+  - 多租户：user_id 过滤使两个账号的持仓互不串账
+  - user_id=None 时合计所有账号（向后兼容脚本/单用户）
 """
 from __future__ import annotations
 
@@ -33,23 +35,39 @@ CREATE TABLE transactions (
     quantity   REAL    NOT NULL CHECK(quantity > 0),
     price      REAL    NOT NULL CHECK(price >= 0),
     date       TEXT    NOT NULL,
-    notes      TEXT    DEFAULT ''
+    notes      TEXT    DEFAULT '',
+    user_id    INTEGER
 )
 """
 
 _INSERT = """
-INSERT INTO transactions (ticker, name, type, quantity, price, date)
-VALUES (?, ?, ?, ?, ?, '2024-01-01')
+INSERT INTO transactions (ticker, name, type, quantity, price, date, user_id)
+VALUES (?, ?, ?, ?, ?, '2024-01-01', ?)
 """
 
 
 # ── 测试用 DB 工具 ──────────────────────────────────────────────────────────
 
-def _make_db(tmp_path: Path, rows: list[tuple]) -> Path:
+def _make_db(tmp_path: Path, rows: list[tuple], user_id: int = 1) -> Path:
     """
     在 tmp_path 下创建一个 SQLite，建好 transactions 表，插入 rows。
 
-    rows 格式：(ticker, name, type, quantity, price)
+    rows 格式：(ticker, name, type, quantity, price) —— 全部归属同一个 user_id（默认 1）。
+    """
+    db = tmp_path / "trade.db"
+    con = sqlite3.connect(db)
+    con.execute(_CREATE)
+    con.executemany(_INSERT, [(*r, user_id) for r in rows])
+    con.commit()
+    con.close()
+    return db
+
+
+def _make_db_multi(tmp_path: Path, rows: list[tuple]) -> Path:
+    """
+    多账号版本：每行显式带 user_id，用于验证账号隔离。
+
+    rows 格式：(ticker, name, type, quantity, price, user_id)
     """
     db = tmp_path / "trade.db"
     con = sqlite3.connect(db)
@@ -213,3 +231,41 @@ def test_real_portfolio_scenario(tmp_path):
     assert set(result) == {"ARM", "MU"}
     assert result["ARM"]  == pytest.approx(142.0)
     assert result["MU"]   == pytest.approx(45.5)
+
+
+# ── 多租户隔离 ──────────────────────────────────────────────────────────────
+
+def test_user_id_isolation(tmp_path):
+    """同一个 trade.db 里，两个账号的持仓互不串账。"""
+    db = _make_db_multi(tmp_path, [
+        ("AAPL", "Apple", "buy", 10.0, 150.0, 1),
+        ("MSFT", "MS",    "buy",  5.0, 300.0, 1),
+        ("TSLA", "Tesla", "buy",  7.0, 200.0, 2),
+        ("AAPL", "Apple", "buy",  3.0, 155.0, 2),  # 账号2 也持有 AAPL，但份额独立
+    ])
+    u1 = load_holdings(db, user_id=1)
+    u2 = load_holdings(db, user_id=2)
+
+    assert set(u1) == {"AAPL", "MSFT"}
+    assert u1["AAPL"] == pytest.approx(10.0)        # 只含账号1的 10 股
+
+    assert set(u2) == {"TSLA", "AAPL"}
+    assert u2["AAPL"] == pytest.approx(3.0)         # 只含账号2的 3 股，不混入账号1
+
+
+def test_user_id_none_aggregates_all(tmp_path):
+    """user_id=None → 合计所有账号（脚本/单用户向后兼容）。"""
+    db = _make_db_multi(tmp_path, [
+        ("AAPL", "Apple", "buy", 10.0, 150.0, 1),
+        ("AAPL", "Apple", "buy",  3.0, 155.0, 2),
+    ])
+    allh = load_holdings(db)                          # 不传 user_id
+    assert allh["AAPL"] == pytest.approx(13.0)        # 10 + 3 合计
+
+
+def test_user_id_with_no_holdings_returns_empty(tmp_path):
+    """查询一个没有任何交易的账号 → 空字典（不泄露其他账号持仓）。"""
+    db = _make_db_multi(tmp_path, [
+        ("AAPL", "Apple", "buy", 10.0, 150.0, 1),
+    ])
+    assert load_holdings(db, user_id=999) == {}

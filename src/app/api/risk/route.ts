@@ -12,6 +12,7 @@
  */
 
 import { NextResponse } from 'next/server';
+import { getCurrentUserId } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,10 +20,14 @@ const QUANT_URL = process.env.QUANT_SERVICE_URL ?? 'http://127.0.0.1:8000';
 const TIMEOUT_MS = 60_000; // 价格数据首次拉取可能需要较长时间
 
 export async function GET() {
+  const userId = await getCurrentUserId();
+  if (userId == null) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
   let res: Response;
 
   try {
-    res = await fetch(`${QUANT_URL}/risk/portfolio`, {
+    // 透传 user_id：quant 服务只分析该账号自己的持仓（多租户隔离）
+    res = await fetch(`${QUANT_URL}/risk/portfolio?user_id=${userId}`, {
       signal: AbortSignal.timeout(TIMEOUT_MS),
       // 不携带用户 cookie：quant 服务只监听 127.0.0.1，无需鉴权
       cache: 'no-store',

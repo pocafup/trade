@@ -29,7 +29,8 @@ _DEFAULT_DB = (
 # 浮点残值过滤阈值：净持股低于此值视为已清仓
 _MIN_SHARES = 1e-9
 
-_SQL = """
+# 全账号合计（脚本/单用户场景）。参数：(_MIN_SHARES,)
+_SQL_ALL = """
 SELECT ticker, net_shares
 FROM (
     SELECT
@@ -37,6 +38,23 @@ FROM (
         SUM(CASE WHEN type = 'buy'  THEN quantity ELSE 0.0 END) -
         SUM(CASE WHEN type = 'sell' THEN quantity ELSE 0.0 END) AS net_shares
     FROM transactions
+    GROUP BY ticker
+)
+WHERE net_shares > ?
+ORDER BY ticker
+"""
+
+# 单账号隔离（多租户场景）。WHERE user_id 过滤放在内层聚合前，
+# 确保只统计该用户的买卖。参数：(user_id, _MIN_SHARES)
+_SQL_BY_USER = """
+SELECT ticker, net_shares
+FROM (
+    SELECT
+        ticker,
+        SUM(CASE WHEN type = 'buy'  THEN quantity ELSE 0.0 END) -
+        SUM(CASE WHEN type = 'sell' THEN quantity ELSE 0.0 END) AS net_shares
+    FROM transactions
+    WHERE user_id = ?
     GROUP BY ticker
 )
 WHERE net_shares > ?
@@ -54,20 +72,25 @@ def _db_uri(path: Path) -> str:
     return f"file:///{path.resolve().as_posix()}?mode=ro"
 
 
-def load_holdings(db_path: Path | str | None = None) -> dict[str, float]:
+def load_holdings(
+    db_path: Path | str | None = None,
+    user_id: int | None = None,
+) -> dict[str, float]:
     """
     读取 trade.db 中的当前净持仓。
 
     参数
     ────
     db_path : trade.db 的路径。None → 使用默认路径（../data/trade.db）。
+    user_id : 账号隔离。None → 合计所有账号（脚本/单用户场景）；
+              传入整数 → 只统计该 user_id 的买卖（多租户隔离）。
 
     返回
     ────
     {ticker: net_shares}
       - 键为大写股票代码，值为净持股数（浮点，保留小数股精度）
       - 已清仓或净持股极小（< 1e-9）的标的不会出现在结果里
-      - 若 transactions 表为空，返回空字典
+      - 若 transactions 表为空（或该用户无持仓），返回空字典
 
     异常
     ────
@@ -82,10 +105,15 @@ def load_holdings(db_path: Path | str | None = None) -> dict[str, float]:
             "请确认 trade 应用已运行过并初始化了数据库。"
         )
 
+    if user_id is None:
+        sql, params = _SQL_ALL, (_MIN_SHARES,)
+    else:
+        sql, params = _SQL_BY_USER, (user_id, _MIN_SHARES)
+
     uri = _db_uri(path)
     con = sqlite3.connect(uri, uri=True)
     try:
-        rows = con.execute(_SQL, (_MIN_SHARES,)).fetchall()
+        rows = con.execute(sql, params).fetchall()
     finally:
         con.close()
 

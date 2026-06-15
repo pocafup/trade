@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { getCurrentUserId } from '@/lib/session';
 import { getQuote } from '@/lib/yahoo';
 
 export const dynamic = 'force-dynamic';
@@ -17,8 +18,11 @@ export interface PnlRecord {
 }
 
 export async function GET() {
+  const userId = await getCurrentUserId();
+  if (userId == null) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
   const db = getDb();
-  const txns = db.prepare('SELECT ticker, name, type, quantity, price, date FROM transactions ORDER BY date ASC').all() as unknown as Txn[];
+  const txns = db.prepare('SELECT ticker, name, type, quantity, price, date FROM transactions WHERE user_id = ? ORDER BY date ASC').all(userId) as unknown as Txn[];
 
   const byTicker = new Map<string, { txns: Txn[]; name: string }>();
   for (const t of txns) {

@@ -55,14 +55,38 @@ def _clean(x: Any) -> Any:
     return x
 
 
-def _load_source() -> tuple[dict[str, float], str, float, str, str, str]:
+def _load_source(user_id: int | None = None) -> tuple[dict[str, float], str, float, str, str, str]:
     """
     按优先级加载持仓。
+
+    user_id 不为 None（多租户，前端 /api/risk 调用）：
+      只读该账号自己的 trade.db 持仓，绝不回退到共享的 my_portfolio.json
+      ——否则会把某个账号的演示持仓泄露给所有账号。该账号无持仓 → 503。
+
+    user_id 为 None（脚本/单用户直连）：
+      trade.db 合计持仓 ≥ 3 只 → 用 db；否则回退 my_portfolio.json。
 
     返回 (holdings, input_type, risk_free, lookback, source, source_detail)
       source = "db" | "json"
     """
-    # ── 1. trade.db ───────────────────────────────────────────────────────────
+    # ── 多租户：严格按账号隔离，不回退 JSON ──────────────────────────────────
+    if user_id is not None:
+        try:
+            user_holdings = load_holdings(user_id=user_id)
+        except FileNotFoundError:
+            user_holdings = {}
+        if not user_holdings:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "no_holdings",
+                    "message": "该账号暂无持仓，请先在 trade 应用录入交易。",
+                },
+            )
+        detail = f"trade.db（账号 #{user_id}，{len(user_holdings)} 只持仓）"
+        return user_holdings, "shares", _DEFAULT_RF, _DEFAULT_LOOKBACK, "db", detail
+
+    # ── 1. trade.db（合计，脚本/单用户）─────────────────────────────────────
     db_holdings: dict[str, float] = {}
     try:
         db_holdings = load_holdings()
@@ -168,17 +192,19 @@ def health():
 
 
 @app.get("/risk/portfolio")
-def portfolio_risk():
+def portfolio_risk(user_id: int | None = None):
     """
     完整组合风险分析。
 
-    数据源自动选择：
-      - trade.db 持仓 ≥ 3 只 → source = "db"
-      - 否则读 my_portfolio.json   → source = "json"
+    参数
+    ────
+    user_id : 由前端 /api/risk 代理透传。传入 → 只分析该账号自己的持仓
+              （多租户隔离，不回退共享 JSON）；省略 → 脚本/单用户模式，
+              trade.db 合计持仓 ≥ 3 只用 db，否则回退 my_portfolio.json。
 
     价格统一由 data/prices.py 的 fetch()（Yahoo Finance，复权，SQLite 缓存）拉取。
     """
-    holdings, input_type, risk_free, lookback, source, source_detail = _load_source()
+    holdings, input_type, risk_free, lookback, source, source_detail = _load_source(user_id)
 
     # warnings.catch_warnings 避免缺失标的的 warn 打印到日志
     with warnings.catch_warnings():

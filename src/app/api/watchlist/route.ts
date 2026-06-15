@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { getCurrentUserId } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,8 +30,11 @@ async function batchQuotes(tickers: string[]) {
 }
 
 export async function GET() {
+  const userId = await getCurrentUserId();
+  if (userId == null) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
   const db = getDb();
-  const rows = db.prepare('SELECT ticker, name FROM watchlist ORDER BY added_at DESC').all() as { ticker: string; name: string }[];
+  const rows = db.prepare('SELECT ticker, name FROM watchlist WHERE user_id = ? ORDER BY added_at DESC').all(userId) as { ticker: string; name: string }[];
   if (!rows.length) return NextResponse.json([]);
 
   const quotes = await batchQuotes(rows.map(r => r.ticker));
@@ -44,9 +48,12 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const userId = await getCurrentUserId();
+  if (userId == null) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
   const { ticker, name } = await req.json();
   if (!ticker) return NextResponse.json({ error: 'ticker required' }, { status: 400 });
   const db = getDb();
-  db.prepare('INSERT OR REPLACE INTO watchlist (ticker, name) VALUES (?, ?)').run(ticker.toUpperCase(), name ?? ticker);
+  db.prepare('INSERT OR REPLACE INTO watchlist (user_id, ticker, name) VALUES (?, ?, ?)').run(userId, ticker.toUpperCase(), name ?? ticker);
   return NextResponse.json({ ok: true });
 }

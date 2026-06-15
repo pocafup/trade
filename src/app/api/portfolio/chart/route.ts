@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { getCurrentUserId } from '@/lib/session';
 import { getChart } from '@/lib/yahoo';
 
 export const dynamic = 'force-dynamic';
@@ -9,12 +10,16 @@ interface Txn { ticker: string; type: 'buy' | 'sell'; quantity: number; date: st
 const cache = new Map<string, { data: unknown; expiry: number }>();
 
 export async function GET(req: NextRequest) {
+  const userId = await getCurrentUserId();
+  if (userId == null) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
   const range = new URL(req.url).searchParams.get('range') ?? '1y';
-  const cached = cache.get(range);
+  const cacheKey = `${userId}:${range}`;
+  const cached = cache.get(cacheKey);
   if (cached && cached.expiry > Date.now()) return NextResponse.json(cached.data);
 
   const db = getDb();
-  const txns = db.prepare('SELECT ticker, type, quantity, date FROM transactions ORDER BY date ASC').all() as unknown as Txn[];
+  const txns = db.prepare('SELECT ticker, type, quantity, date FROM transactions WHERE user_id = ? ORDER BY date ASC').all(userId) as unknown as Txn[];
   if (!txns.length) return NextResponse.json([]);
 
   const tickers = [...new Set(txns.map(t => t.ticker))];
@@ -83,6 +88,6 @@ export async function GET(req: NextRequest) {
     if (value > 0) result.push({ t: dayMs, p: value });
   }
 
-  cache.set(range, { data: result, expiry: Date.now() + 5 * 60_000 });
+  cache.set(cacheKey, { data: result, expiry: Date.now() + 5 * 60_000 });
   return NextResponse.json(result);
 }

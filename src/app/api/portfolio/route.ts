@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { getCurrentUserId } from '@/lib/session';
 import { getQuote, getYearStartPrice, getDividends } from '@/lib/yahoo';
 
 export const dynamic = 'force-dynamic';
@@ -14,8 +15,11 @@ interface Txn {
 }
 
 export async function GET() {
+  const userId = await getCurrentUserId();
+  if (userId == null) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
   const db = getDb();
-  const txns = db.prepare('SELECT * FROM transactions ORDER BY date ASC').all() as unknown as Txn[];
+  const txns = db.prepare('SELECT * FROM transactions WHERE user_id = ? ORDER BY date ASC').all(userId) as unknown as Txn[];
 
   const byTicker = new Map<string, { txns: Txn[]; name: string }>();
   for (const t of txns) {
@@ -145,8 +149,8 @@ export async function GET() {
 
   // ── Cash flow computations ───────────────────────────────────────────────────
   const cashFlows = db.prepare(
-    'SELECT type, amount, date FROM cash_flows ORDER BY date ASC',
-  ).all() as { type: string; amount: number; date: string }[];
+    'SELECT type, amount, date FROM cash_flows WHERE user_id = ? ORDER BY date ASC',
+  ).all(userId) as { type: string; amount: number; date: string }[];
 
   // Net cash spent on stocks across all time (buys - sells, by proceeds)
   const netStockSpend = txns.reduce(
