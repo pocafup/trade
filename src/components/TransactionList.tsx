@@ -54,8 +54,14 @@ export default function TransactionList({ transactions, onDeleted }: { transacti
   async function del(id: number) {
     if (!confirm('确定删除这条交易记录？')) return;
     setDeleting(id);
-    await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
     setDeleting(null);
+    if (!res.ok) {
+      // 例如：买入批次已被卖出配对占用（409），需先删除对应卖出
+      const d = await res.json().catch(() => ({}));
+      alert(d?.error || '删除失败');
+      return;
+    }
     onDeleted();
   }
 

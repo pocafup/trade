@@ -2,16 +2,25 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getCurrentUserId } from '@/lib/session';
 import { getQuote, getYearStartPrice, getDividends } from '@/lib/yahoo';
+import {
+  computeOpenLots,
+  weightedAvgCost,
+  sellRealizedPnl,
+  fallbackCostForSell,
+  type AllocInput,
+} from '@/lib/lots';
 
 export const dynamic = 'force-dynamic';
 
 interface Txn {
+  id: number;
   ticker: string;
   name: string;
   type: 'buy' | 'sell';
   quantity: number;
   price: number;
   date: string;
+  created_at: string;
 }
 
 export async function GET() {
@@ -27,26 +36,46 @@ export async function GET() {
     byTicker.get(t.ticker)!.txns.push(t);
   }
 
+  // 批次分配：每笔卖出对应哪些买入批次、各多少股（具体识别法的数据基础）
+  const allocRows = db
+    .prepare(
+      `SELECT sa.sell_txn_id, sa.buy_txn_id, sa.quantity, b.price AS buy_price, b.ticker
+       FROM sell_allocations sa
+       JOIN transactions b ON b.id = sa.buy_txn_id
+       WHERE b.user_id = ?`,
+    )
+    .all(userId) as unknown as {
+    sell_txn_id: number; buy_txn_id: number; quantity: number; buy_price: number; ticker: string;
+  }[];
+  const allocsBySell = new Map<number, { quantity: number; buy_price: number }[]>();
+  const allocsByTicker = new Map<string, AllocInput[]>();
+  for (const a of allocRows) {
+    if (!allocsBySell.has(a.sell_txn_id)) allocsBySell.set(a.sell_txn_id, []);
+    allocsBySell.get(a.sell_txn_id)!.push({ quantity: a.quantity, buy_price: a.buy_price });
+    if (!allocsByTicker.has(a.ticker)) allocsByTicker.set(a.ticker, []);
+    allocsByTicker.get(a.ticker)!.push({ buy_txn_id: a.buy_txn_id, quantity: a.quantity });
+  }
+
   const tickers = Array.from(byTicker.keys());
   const quotes = await Promise.all(tickers.map((t) => getQuote(t)));
   const quoteMap = new Map(tickers.map((t, i) => [t, quotes[i]]));
 
   const yearStart = `${new Date().getFullYear()}-01-01`;
 
-  // YTD realized P&L: gains from sell transactions since Jan 1 (using avg cost basis)
+  // YTD 已实现盈亏：今年以来每笔卖出按"具体识别法"计算——
+  // 卖了哪个批次，就用哪个批次的买价做成本：Σ(卖价 − 该批买价) × 分配股数。
+  // 迁移前的老卖出已按 FIFO 回填分配；个别无法配对的存量超卖残量走 fallback（历史买入均价）。
   let ytdPnl = 0;
   for (const [, { txns }] of byTicker) {
-    let avgCost = 0, shares = 0;
+    const buys = txns.filter((t) => t.type === 'buy');
     for (const txn of txns) {
-      if (txn.type === 'buy') {
-        const totalCostBasis = shares * avgCost + txn.quantity * txn.price;
-        shares += txn.quantity;
-        avgCost = totalCostBasis / shares;
-      } else {
-        if (txn.date >= yearStart) ytdPnl += txn.quantity * (txn.price - avgCost);
-        shares -= txn.quantity;
-        if (shares < 0.0001) { shares = 0; avgCost = 0; }
-      }
+      if (txn.type !== 'sell' || txn.date < yearStart) continue;
+      ytdPnl += sellRealizedPnl(
+        txn.quantity,
+        txn.price,
+        allocsBySell.get(txn.id) ?? [],
+        fallbackCostForSell(buys, txn.date, txn.price),
+      );
     }
   }
 
@@ -112,8 +141,16 @@ export async function GET() {
 
     if (shares <= 0.0001) continue;
 
-    const totalBuyCost = buys.reduce((s, t) => s + t.quantity * t.price, 0);
-    const avgCost = totalBuyCost / sharesBought;
+    // 持仓成本 = 剩余批次的加权成本（具体识别法）：卖掉某批后，成本只反映还没卖的批次。
+    // 例：10股@100 + 10股@200，卖掉 @100 那批后成本是 200，而不是历史均价 150。
+    const openLots = computeOpenLots(buys, allocsByTicker.get(ticker) ?? []);
+    let avgCost = weightedAvgCost(openLots);
+    if (avgCost === 0 && shares > 0.0001) {
+      // 存量超卖的"幽灵仓"：净持股为正但批次已全部耗尽（历史数据不一致），
+      // 回退到终身买入均价，避免显示 0 成本
+      const totalBuyCost = buys.reduce((s, t) => s + t.quantity * t.price, 0);
+      avgCost = totalBuyCost / sharesBought;
+    }
 
     const q = quoteMap.get(ticker);
     const currentPrice = q?.price ?? 0;

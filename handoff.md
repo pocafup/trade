@@ -22,7 +22,8 @@ trade/
   lib/
     yahoo.ts              Yahoo Finance 封装（getQuote / getQuoteSummary）
     daily-focus.ts        AI 分析逻辑（Claude Haiku / Gemini Flash）
-    db.ts                 SQLite (better-sqlite3)
+    db.ts                 SQLite (Node 内置 node:sqlite，非 better-sqlite3)
+    lots.ts               批次(lot)纯函数计算 + lots.test.ts 单元测试
   quant/                  Python FastAPI 量化服务
     main.py               GET /risk/portfolio 端点
     data/
@@ -223,6 +224,35 @@ Docker 内自动用 Dockerfile CMD 启动，无需手动。
 ### 注意
 - `earningsHistory.history[].period` 是 `"+4q"` 这类相对标签，**不是**季度名称；真正的日期在 `quarter.fmt`（格式 `"M/DD/YYYY"`）
 - `incomeStatementHistoryQuarterly.incomeStatementHistory[].endDate.fmt` 格式是 `"YYYY-MM-DD"`，季度转换：月份 ÷ 3 向上取整
+
+---
+
+## 批次(Lot)卖出与超卖校验（2026-07-02）
+
+### 数据模型
+- 每笔买入 = 一个批次；卖出通过 `sell_allocations` 表分配到一个或多个买入批次：
+  `sell_allocations(id, sell_txn_id → transactions, buy_txn_id → transactions, quantity, created_at, UNIQUE(sell_txn_id, buy_txn_id))`
+- `transactions` 表不变，仍 append-only；持仓数量类计算（chart/daily-focus/quant Python）不受影响
+- 首次启动迁移 `migrateSellAllocations()`（db.ts）：存量卖出按 **FIFO** 回填分配；
+  存量超卖（卖出多于此前买入）能配多少配多少，剩余留空 + console.warn
+- 同日无时分秒，排序规则：日期 → 买入先于卖出 → created_at → id（`lots.ts compareTxnsForFifo`）
+
+### 成本/盈亏口径 = 批次具体识别法（2026-07-02 起）
+- 持仓成本 = **剩余批次**加权成本（`weightedAvgCost`），卖掉某批后成本只反映没卖的批次
+- 已实现盈亏 = Σ(卖价 − 所卖批次买价) × 分配股数（`sellRealizedPnl`）
+- 旧口径（持仓页终身买入均价 / 盈亏页移动平均）已废弃——两者本来就互相矛盾
+- 无法配对的存量超卖残量：成本兜底 = 卖出日前买入加权均价，无买入则 = 卖价（零盈亏）
+
+### API
+- `GET /api/lots?ticker=X` → `{ticker, lots:[{buy_txn_id,date,price,quantity,remaining}], totalRemaining}`
+- `POST /api/transactions` 卖出可带 `allocations:[{buy_txn_id,quantity}]`；不带则服务端 FIFO 自动分配。
+  校验（400）：批次存在且属于本人本股票、买入日 ≤ 卖出日、不超剩余量、合计 = 卖出股数、持仓充足。
+  写入用 `BEGIN IMMEDIATE` 防并发穿插
+- `DELETE /api/transactions/[id]`：删卖出会连同分配一起删（批次恢复）；
+  删已被配对的买入 → **409**，要先删对应卖出
+
+### 测试
+- `npm test`（Node ≥23.6，零依赖跑 TS）：`src/lib/lots.test.ts` 覆盖全部批次数学
 
 ---
 

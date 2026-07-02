@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import fs from 'fs';
+import { QTY_EPS, round8, compareTxnsForFifo, fifoAllocate, type OpenLot } from './lots';
 
 let _db: DatabaseSync | null = null;
 
@@ -13,6 +14,8 @@ export function getDb(): DatabaseSync {
 
   _db = new DatabaseSync(dbPath);
   _db.exec('PRAGMA journal_mode = WAL;');
+  // 显式开启外键约束：本机 Node 24 默认开，但 Docker 的 node:22 不一定
+  _db.exec('PRAGMA foreign_keys = ON;');
   _db.exec(`
     CREATE TABLE IF NOT EXISTS transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,6 +59,7 @@ export function getDb(): DatabaseSync {
   `);
 
   migrateToMultiUser(_db);
+  migrateSellAllocations(_db); // 必须在 multi-user 迁移之后（回填按 user_id 分组）
 
   return _db;
 }
@@ -63,6 +67,13 @@ export function getDb(): DatabaseSync {
 function hasColumn(db: DatabaseSync, table: string, col: string): boolean {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
   return cols.some((c) => c.name === col);
+}
+
+function hasTable(db: DatabaseSync, table: string): boolean {
+  const row = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
+    .get(table);
+  return row !== undefined;
 }
 
 /**
@@ -139,4 +150,86 @@ function resolveLegacyOwnerId(db: DatabaseSync): number | null {
 
   const first = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get() as { id: number } | undefined;
   return first?.id ?? null;
+}
+
+/**
+ * 批次(lot)迁移：建 sell_allocations 表，并把存量卖出按 FIFO（先买先卖）
+ * 回填到买入批次上。此后每笔卖出都必须有分配记录（新卖出由 API 层写入）。
+ * 幂等——以表是否存在为守卫，只在第一次启动时回填一次。
+ */
+function migrateSellAllocations(db: DatabaseSync): void {
+  if (hasTable(db, 'sell_allocations')) return; // 已迁移过
+
+  db.exec('BEGIN');
+  try {
+    db.exec(`
+      CREATE TABLE sell_allocations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sell_txn_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+        buy_txn_id  INTEGER NOT NULL REFERENCES transactions(id),
+        quantity    REAL NOT NULL CHECK(quantity > 0),
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(sell_txn_id, buy_txn_id)
+      );
+      CREATE INDEX idx_alloc_buy  ON sell_allocations(buy_txn_id);
+      CREATE INDEX idx_alloc_sell ON sell_allocations(sell_txn_id);
+    `);
+
+    const txns = db
+      .prepare(
+        `SELECT id, user_id, ticker, type, quantity, date, created_at FROM transactions`,
+      )
+      .all() as unknown as {
+      id: number;
+      user_id: number | null;
+      ticker: string;
+      type: 'buy' | 'sell';
+      quantity: number;
+      date: string;
+      created_at: string;
+    }[];
+
+    // 按 用户×股票 分组（user_id 可能为 NULL——无主遗留数据自成一组）
+    const groups = new Map<string, typeof txns>();
+    for (const t of txns) {
+      const key = `${t.user_id ?? 'null'}:${t.ticker}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(t);
+    }
+
+    const ins = db.prepare(
+      'INSERT INTO sell_allocations (sell_txn_id, buy_txn_id, quantity) VALUES (?, ?, ?)',
+    );
+
+    for (const [key, list] of groups) {
+      list.sort(compareTxnsForFifo);
+
+      // 顺序重放：买入开新批次，卖出从最早的批次贪心扣减
+      const lots: OpenLot[] = [];
+      for (const t of list) {
+        if (t.type === 'buy') {
+          lots.push({ buy_txn_id: t.id, date: t.date, price: 0, quantity: t.quantity, remaining: t.quantity });
+          continue;
+        }
+        const { allocations, unallocated } = fifoAllocate(t.quantity, lots);
+        for (const a of allocations) {
+          ins.run(t.id, a.buy_txn_id, a.quantity);
+          const lot = lots.find((l) => l.buy_txn_id === a.buy_txn_id)!;
+          lot.remaining = round8(lot.remaining - a.quantity);
+        }
+        if (unallocated > QTY_EPS) {
+          // 存量数据本身超卖（卖出多于此前买入）：能配多少配多少，剩余留空。
+          // 盈亏计算对未分配残量有 fallback（见 lots.ts sellRealizedPnl），不会 NaN。
+          console.warn(
+            `[migrate:sell_allocations] 存量超卖：${key} 卖出#${t.id}（${t.date}）有 ${unallocated} 股无法配对到买入批次，保留为未分配`,
+          );
+        }
+      }
+    }
+
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
